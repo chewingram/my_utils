@@ -6,10 +6,9 @@ from ase.io import read, write
 from ase.build import make_supercell
 import os
 import sys
-sys.path.append('/scratch/ulg/matnan/slongo/my_scripts/')
-import utils_tdep as tdp
+import .utils_tdep as tdp
 from subprocess import run
-import utils_mlip as mlp
+import .utils_mlip as mlp
 from ase.calculators.singlepoint import SinglePointCalculator
 
 

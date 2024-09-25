@@ -2,8 +2,7 @@ import numpy as np
 from ase.io import read, write
 from ase.build import make_supercell
 import sys
-sys.path.append('/scratch/ulg/matnan/slongo/my_scripts/')
-from utils import from_list_of_numbs_to_text, path, data_reader
+from .utils import from_list_of_numbs_to_text, path, data_reader
 import os
 from subprocess import run
 from math import floor

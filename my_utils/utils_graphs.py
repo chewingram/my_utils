@@ -4,8 +4,7 @@ import sys
 from ase.io import read, write
 import matplotlib.pyplot as plt
 import os
-sys.path.append('/scratch/ulg/matnan/slongo/my_scripts/')
-from utils import cap_first, mae, rmse, R2, low_first, path
+from .utils import cap_first, mae, rmse, R2, low_first, path
 
 
 
