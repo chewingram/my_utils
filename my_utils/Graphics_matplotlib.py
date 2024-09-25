@@ -2,8 +2,8 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 import sys
-sys.path.append('/Users/longosamuel/Work/my_scripts')
-from utils import warn, repeat
+#sys.path.append('/Users/longosamuel/Work/my_scripts')
+from .utils import warn, repeat
 from numbers import Number
 
 class Histogram:

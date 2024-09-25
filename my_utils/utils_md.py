@@ -6,9 +6,9 @@ from ase.calculators.lammpsrun import LAMMPS
 from mlacs.state import LammpsState
 from mlacs.utilities.io_lammps import reconstruct_mlmd_trajectory
 import sys
-sys.path.append('/scratch/ulg/matnan/slongo/my_scripts/')
-from utils import path
-from utils_mlip import calc_efs_from_ase, pot_from_pair_style
+#sys.path.append('/scratch/ulg/matnan/slongo/my_scripts/')
+from .utils import path
+from .utils_mlip import calc_efs_from_ase, pot_from_pair_style
 import builtins
 
 

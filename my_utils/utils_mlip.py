@@ -8,7 +8,7 @@ import os
 import sys
 
 #sys.path.append("/scratch/ulg/matnan/slongo/my_scripts")
-from utils import data_reader, cap_first, repeat, warn, from_list_to_text, mae, rmse, R2, low_first, path
+from .utils import data_reader, cap_first, repeat, warn, from_list_to_text, mae, rmse, R2, low_first, path
 from .Graphics_matplotlib import Histogram
 
 
@@ -174,7 +174,6 @@ def check_sets(bins, trainset_name='TrainSet.traj', testset_name='TestSet.traj',
     hist_test.make_bars(plot=False)
     hist_test.plot_bars(save=save, fname='Test_sets.png', format='png', dpi=600, bbox_inches='tight')
 
-    /
     
     
     
