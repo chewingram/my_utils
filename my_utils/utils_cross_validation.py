@@ -1,9 +1,8 @@
 import numpy as np
 import os
 import sys
-sys.path.append('/scratch/ulg/matnan/slongo/my_scripts/')
-from utils import data_reader, space, path, inv_dict, mae, rmse, R2, cap_first, low_first
-import utils_mlip as mlp
+from .utils import data_reader, space, path, inv_dict, mae, rmse, R2, cap_first, low_first
+import .utils_mlip as mlp
 import random as rnd
 from ase.io import read, write
 import shutil
