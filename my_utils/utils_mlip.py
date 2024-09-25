@@ -7,9 +7,9 @@ import os
 
 import sys
 
-sys.path.append("/scratch/ulg/matnan/slongo/my_scripts")
+#sys.path.append("/scratch/ulg/matnan/slongo/my_scripts")
 from utils import data_reader, cap_first, repeat, warn, from_list_to_text, mae, rmse, R2, low_first, path
-from Graphics_matplotlib import Histogram
+from .Graphics_matplotlib import Histogram
 
 
 from ase.io import read, write

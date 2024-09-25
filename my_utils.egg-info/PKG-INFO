@@ -1,0 +1,10 @@
+Metadata-Version: 2.1
+Name: my-utils
+Version: 0.0.0
+Summary: A collection of my utils
+Home-page: https://github.com/chewingram/my_utils
+Author: Samuel Longo
+Author-email: longo.samuel@outlook.it
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: Unix
