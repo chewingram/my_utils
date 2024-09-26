@@ -226,18 +226,103 @@ def make_mtp_file(sp_count, mind, maxd, rad_bas_sz, rad_bas_type='RBChebyshev', 
     with open(outfile_path, 'w') as fl:
         fl.write(text)
 
+def extract_prop(structures=None, filepath=None):
+    '''Function to extract properties
+    
+    It can be either an (list of) ase.atoms.Atoms object(s) or a .cfg file.
+    Only one of 'structures' and 'filepath' can be different from None!
+    
+    Parameters
+    ----------
+    structures: ase.atoms.Atoms or list of ase.atoms.Atoms
+        it can and must be None only if filepath is not None
+    filepath: str
+        path to the .cfg file; it can and must be None only if structures is not None
+    
+    
+    Returns
+    -------
+    energy: list of float
+            energy PER ATOM of each configuration (in eV)
+    forces:list of float
+            forces with shape confs x natoms x 3 (in eV/Angst)
+    stress: list of float
+            stress tensor for each configuration (in eV/Angst^2)
         
-        
-def extract_prop(filepath):
+    Notes
+    -----
+    The convention for the stress is that the stress tensor element are:
+    sigma = + dE/dn (n=strain) (note the sign!)
+    
+    
     '''
-    Function to extract energy (per atom), forces and stress from a set of configurations contained in
+    
+    assert any([structures != None, filepath != None]), f"Either structure or filepath must be given!"
+    assert not all([structures != None, filepath != None]) f"Either structure or filepath can be given!"
+    if structures != None:
+        if isinstance(structures, ase.atoms.Atoms()):
+            structures = [structures]
+        elif isinstance(structures, list):
+            assert all([isinstance(x) for x in structures]), \
+                   f"Some element of structures is not an ase.atoms.Atoms object!"
+        extract_ptop_from_ase(structures)
+    else:
+        extract_prop_from_cfg(filepath)
+
+        
+def extract_prop_from_ase(structures):
+    '''Function to extract energy (per atom), forces and stress from an ase trajectory
+    
+    Parameters
+    ----------
+    structures: ase.atoms.Atoms or list of ase.atoms.Atoms
+       trajectory 
+        
+    Returns
+    -------
+    energy: list of float
+            energy PER ATOM of each configuration (in eV)
+    forces: list of float
+            forces with shape confs x natoms x 3 (in eV/Angst)
+    stress: list of float
+            stress tensor for each configuration (in eV/Angst^2)
+        
+    Notes
+    -----
+    The convention for the stress is that the stress tensor element are:
+    sigma = + dE/dn (n=strain) (note the sign!)
+    
+    '''
+    
+    energy = []
+    forces = []
+    stress = []
+    
+
+
+def extract_prop_from_cfg(filepath):
+    '''Function to extract energy (per atom), forces and stress from a set of configurations contained in
     a single .cfg file.
-    Arguments:
-    filepath(str): path to the .cfg file containing the configurations
-    Returns:
-    energy(list): energy per atom of each configuration (in eV)
-    forces(list): forces with shape confs x natoms x 3 (in eV/Angst)
-    stress(list): stress tensor for each configuration (in eV/Angst^2); convention: sigma = + dE/dn (n=strain).
+    
+    Parameters
+    ----------
+    filepath: str
+        path to the .cfg file containing the configurations
+        
+    Returns
+    -------
+    energy: list of float
+            energy PER ATOM of each configuration (in eV)
+    forces:list of float
+            forces with shape confs x natoms x 3 (in eV/Angst)
+    stress: list of float
+            stress tensor for each configuration (in eV/Angst^2)
+        
+    Notes
+    -----
+    The convention for the stress is that the stress tensor element are:
+    sigma = + dE/dn (n=strain) (note the sign!)
+    
     '''
     with open(filepath, 'r') as fl:
         lines = fl.readlines()
@@ -295,25 +380,38 @@ def extract_prop(filepath):
     
     
 def make_comparison(file1, file2, props='all', make_file=False, dir='', outfile_pref='', units=None):
-    '''
-    Create the comparison files for energy, forces and stress starting from the .cfg files.
-    Arguments:
-    file1(str): PATH to the file with the true values (.cfg)
-    file2(str): PATH to the file with the ML values (.cfg)
-    props(str, list): must be one value or a list of values chosen from ['energy', 'forces', 'stress', 'all'].
-                     if a list is given containing 'all', all three properties will be considered, independent on
-                     the other elements of the list
-    make_file(bool): True: create a comparison file
-    dir(str): directory the output file will be saved (if make_file=True)
-    outfile_pref(str): the output file will be named [outfile_pref][Property]_comparison.dat (if make_file=True)
-                       e.g.: with outfile_pref = 'MLIP-', for the energy the name would be: MLIP-Energy_comparison.dat 
-    units(list): dictionary with key-value pairs like prop-unit with prop in ['energy', 'forces', 'stress']
-                 and value being a string with the unit to print for the respective property. If None, the
-                 respective units will be eV/at, eV/Angs and GPa.
+    '''Create the comparison files for energy, forces and stress starting from the .cfg files.
+    
+    Parameters
+    ----------
+    file1: str
+        PATH to the file with the true values (.cfg)
+    file2: str
+        PATH to the file with the ML values (.cfg)
+    props: str or list of {'energy', 'forces', 'stress', 'all'}
+        if a list is given containing 'all', all three properties will be
+        considered, independent on the other elements of the list
+    make_file: bool
+        - True: create a comparison file
+    dir: str
+        directory the output file will be saved (if make_file=True)
+    outfile_pref: str
+        the output file will be named [outfile_pref][Property]_comparison.dat 
+        (if make_file=True) e.g.: with outfile_pref = 'MLIP-', for the energy 
+        the name would be: MLIP-Energy_comparison.dat 
+    units: dict, default: {'energy': 'eV/at', 'forces':'eV/Angs', 'stress':'GPa'}
+        dictionary with key-value pairs like prop-unit with prop in 
+        ['energy', 'forces', 'stress'] and value being a string with the unit
+        to print for the respective property. If None, the respective units
+        will be eV/at, eV/Angs and GPa
 
-    Return:
-    errs(list): [rmse, mae, R2] 
+    Returns
+    -------
+    errs: list of float
+        [rmse, mae, R2] 
+        
     '''
+    
     if make_file == True:
         dir = os.path.abspath(dir)
         if not dir.endswith('/'):
@@ -359,6 +457,8 @@ def make_comparison(file1, file2, props='all', make_file=False, dir='', outfile_
                 fl.write(text)
     return errs
 
+def make_comparison_from_ase():
+    pass
 
 def train_pot_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_set_path, dir, params, mpirun=''):
     '''Function to train the MTP model, analogous to train_pot, but the init.mtp file is created by asking the level
@@ -695,15 +795,35 @@ def calc_efs_from_ase(mlip_bin, atoms, mpirun='', pot_path='pot.mtp', cfg_files=
     '''
     Function to calculate energies, forces, and stresses for the configurations in an ASE trajectory with
     pot.mtp, writing the result into the same trajectory (plus out.cfg, if wanted).
-    Arguments:
-    mlip_bin(str): path to the mlip binary file
-    confs_path(str): path to the file containing the configurations on which compute efs (.cfg)
-    pot_path(str): path to the potential file (.mtp)
-    cfg_files(bool): False = the cfg files used to interface to MTP are deleted 
-    out_path(str): path of the cfg output file (.cfg) (relevant only if cfg_file = True)
-    dir(str): directory where to calculate efs
-    write_conf(bool): True = write the trajectory into a file
-    outconf_name(str): name of the file where the trajectory is writetn (only with write_conf=True); by default overwrites.
+    
+    Paramters
+    ---------
+    mlip_bin: str
+        path to the mlip binary file
+    confs_path: str
+        path to the file containing the configurations on which compute efs
+        (.cfg)
+    pot_path: str
+         path to the potential file (.mtp)
+    cfg_files: bool
+         - False = the cfg files used to interface to MTP are deleted 
+    out_path: str
+         path of the cfg output file (.cfg) (relevant only if cfg_file = 
+         True)
+    dir: str
+         directory where to calculate efs
+    write_conf: bool
+         - True = write the trajectory into a file
+    outconf_name: str
+        name of the file where the trajectory is written (only with 
+        write_conf=True); by default overwrites.
+        
+    Returns
+    -------
+    atoms: list of ase.atoms.Atoms
+        trajectory containing the same input structures with their 
+        calculated properties stored
+
     '''
     
     
