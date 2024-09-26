@@ -360,7 +360,109 @@ def make_comparison(file1, file2, props='all', make_file=False, dir='', outfile_
     return errs
 
 
+def train_pot_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_set_path, dir, params, mpirun=''):
+    '''Function to train the MTP model, analogous to train_pot, but the init.mtp file is created by asking the level
     
+        Parameters
+        ----------
+        mpirun: str
+            command for mpi or similar (e.g. 'mpirun')
+        mlip_bin: str
+            path to the MTP binary
+        untrained_pot_file_dir: str 
+            path to the directory containing the untrained mtp init files (.mtp)
+        mtp_level: {2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 21, 22, 24, 26, 28}
+            level of the mtp model to train
+        train_set_path: str 
+            path to the training set (.cfg)
+        dir: str
+            path to the directory where to run the training (and save the output)
+        params: dict 
+            dictionary containing the flags to use; these are the possibilities:
+            ene_weight: float, default=1
+                weight of energies in the fitting
+            for_weight: float, default=0.01
+                weight of forces in the fitting
+            str_weight: float, default=0.001 
+                weight of stresses in the fitting
+            sc_b_for: float, default=0
+                if >0 then configurations near equilibrium (with roughtly force < 
+                <double>) get more weight
+            val_cfg: str 
+                filename with configuration to validate
+            max_iter: int, default=1000
+                maximal number of iterations
+            cur_pot_n: str
+                if not empty, save potential on each iteration with name = cur_pot_n
+            trained_pot_name: str, default="Trained.mtp"
+                filename for trained potential.
+            bgfs_tol: float, default=1e-3
+                stop if error dropped by a factor smaller than this over 50 BFGS 
+                iterations
+            weighting: {'vibrations', 'molecules', 'structures'}, default=vibrations 
+                how to weight configuration wtih different sizes relative to each 
+                other
+            init_par: {'random', 'same'}, default='random'
+                how to initialize parameters if a potential was not pre-fitted;
+                - random: random initialization
+                - same: this is when interaction of all species is the same (more 
+                        accurate fit, but longer optimization)
+            skip_preinit: bool 
+                skip the 75 iterations done when parameters are not given
+            up_mindist: bool
+                updating the mindist parameter with actual minimal interatomic 
+                distance in the training set
+    
+    '''
+    
+    
+    def get_flags(params):
+        flags = dict(ene_weight = '--energy-weight',
+                     for_weight = '--force-weight',
+                     str_weight = '--stress-weight',
+                     sc_b_for = '--scale-by-force',
+                     val_cfg = '--valid_cfgs',
+                     max_iter = '--max-iter',
+                     cur_pot_n = '--curr-pot-name',
+                     trained_pot_name = '--trained-pot-name',
+                     bgfs_tol = '--bgfs-conv-tol',
+                     weighting = '--weighting',
+                     init_par = '--init-params',
+                     skip_preinit = '--skip-preinit',
+                     up_mindist = '--update-mindist')
+
+        cmd = ''
+        for par in list(params.keys()):
+            if par == 'skip_preinit':
+                if params[par] == True:
+                    cmd = f'{cmd} {flags[par]}'
+                continue
+            elif par == 'up_mindist':
+                if params[par] == True:
+                    cmd = f'{cmd} {flags[par]}'
+                continue
+            elif par in list(flags.keys()):
+                cmd = f'{cmd} {flags[par]}={params[par]}'         
+        return cmd
+    
+    dir = os.path.abspath(dir)
+    if not dir.endswith('/'):
+        dir += '/'
+    
+    if 'trained_pot_name' not in list(params.keys()):
+        params['trained_pot_name'] = 'pot.mtp'
+    
+    flags = get_flags(params)
+    init_name = f'{int(mtp_level):0>2d}.mtp'
+    init_path = Path(untrained_pot_file_dir).joinpath(init_name)
+    cmd = f'{mpirun} {mlip_bin} train {init_path} {train_set_path} {flags}'
+    print(cmd)
+    log_path = f'{dir}log_train'
+    err_path = f'{dir}err_train'
+    with open(log_path, 'w') as log, open(err_path, 'w') as err:
+        run(cmd.split(), cwd=dir, stdout=log, stderr=err)
+        
+        
 def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun=''):
     '''
     Function to train the MTP model
@@ -479,6 +581,74 @@ def train_pot_from_ase(mlip_bin, init_path, train_set, dir, params, mpirun=''):
               dir=dir,
               params=params,
               mpirun=mpirun)
+    
+def train_pot_from_ase_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_set, dir, params, mpirun=''):
+    '''Function to train the MTP model
+    
+    Parameters
+    ----------
+    mpirun: str
+        command for mpi or similar (e.g. 'mpirun')
+    mlip_bin: str
+        path to the MTP binary
+    untrained_pot_file_dir: str 
+        path to the directory containing the untrained mtp init files (.mtp)
+    mtp_level: {2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 21, 22, 24, 26, 28}
+        level of the mtp model to train
+    train_set: list, ase.atoms.Atoms 
+        list of ase Atoms objects; energy, forces and stresses must have been 
+        computed and stored in each Atoms object
+    dir: str
+        path to the directory where to run the training (and save the output)
+    params: dict 
+        dictionary containing the flags to use; these are the possibilities:
+        ene_weight: float, default=1
+            weight of energies in the fitting
+        for_weight: float, default=0.01
+            weight of forces in the fitting
+        str_weight: float, default=0.001 
+            weight of stresses in the fitting
+        sc_b_for: float, default=0
+            if >0 then configurations near equilibrium (with roughtly force < 
+            <double>) get more weight
+        val_cfg: str 
+            filename with configuration to validate
+        max_iter: int, default=1000
+            maximal number of iterations
+        cur_pot_n: str
+            if not empty, save potential on each iteration with name = cur_pot_n
+        trained_pot_name: str, default="Trained.mtp"
+            filename for trained potential.
+        bgfs_tol: float, default=1e-3
+            stop if error dropped by a factor smaller than this over 50 BFGS 
+            iterations
+        weighting: {'vibrations', 'molecules', 'structures'}, default=vibrations 
+            how to weight configuration wtih different sizes relative to each 
+            other
+        init_par: {'random', 'same'}, default='random'
+            how to initialize parameters if a potential was not pre-fitted;
+            - random: random initialization
+            - same: this is when interaction of all species is the same (more 
+                    accurate fit, but longer optimization)
+        skip_preinit: bool 
+            skip the 75 iterations done when parameters are not given
+        up_mindist: bool
+            updating the mindist parameter with actual minimal interatomic 
+            distance in the training set
+    '''
+    cfg_path = Path(dir).joinpath('TrainSet.cfg')
+    conv_ase_to_mlip2(atoms=train_set,
+                      out_path=cfg_path,
+                      props=True)
+    
+    train_pot_tmp(mlip_bin=mlip_bin,
+                  untrained_pot_file_dir=untrained_pot_file_dir,
+                  mtp_level=mtp_level,
+                  train_set_path=cfg_path, 
+                  dir=dir,
+                  params=params,
+                  mpirun=mpirun)
+    
 
 def pot_from_ini(fpath):
     with open(fpath, 'r') as fl:
