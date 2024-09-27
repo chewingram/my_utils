@@ -242,11 +242,11 @@ def extract_prop(structures=None, filepath=None):
     
     Returns
     -------
-    energy: list of float
-            energy PER ATOM of each configuration (in eV)
-    forces:list of float
+    energy: numpy.array of float
+            energy PER ATOM of each configuration (in eV/atom)
+    forces: numpy.array of float
             forces with shape confs x natoms x 3 (in eV/Angst)
-    stress: list of float
+    stress: numpy.array of float
             stress tensor for each configuration (in eV/Angst^2)
         
     Notes
@@ -258,7 +258,7 @@ def extract_prop(structures=None, filepath=None):
     '''
     
     assert any([structures != None, filepath != None]), f"Either structure or filepath must be given!"
-    assert not all([structures != None, filepath != None]) f"Either structure or filepath can be given!"
+    assert not all([structures != None, filepath != None]), f"Either structure or filepath can be given!"
     if structures != None:
         if isinstance(structures, ase.atoms.Atoms()):
             structures = [structures]
@@ -280,11 +280,11 @@ def extract_prop_from_ase(structures):
         
     Returns
     -------
-    energy: list of float
-            energy PER ATOM of each configuration (in eV)
-    forces: list of float
+    energy: numpy.array of float
+            energy PER ATOM of each configuration (in eV/atom)
+    forces: numpy.array of float
             forces with shape confs x natoms x 3 (in eV/Angst)
-    stress: list of float
+    stress: numpy.array of float
             stress tensor for each configuration (in eV/Angst^2)
         
     Notes
@@ -294,9 +294,13 @@ def extract_prop_from_ase(structures):
     
     '''
     
-    energy = []
-    forces = []
-    stress = []
+    if isinstance(structures, ase.atoms.Atoms):
+        structures = [structures]
+    energy = np.array([x.get_total_energy()/len(x) for x in structures], dtype='float')
+    forces = np.array([x.get_forces() for x in structures], dtype='float')
+    stress = np.array([x.get_stress() for x in structures], dtype='float')
+    
+    return energies, forces, stress
     
 
 
@@ -311,11 +315,11 @@ def extract_prop_from_cfg(filepath):
         
     Returns
     -------
-    energy: list of float
-            energy PER ATOM of each configuration (in eV)
-    forces:list of float
+    energy: numpy.array of float
+            energy PER ATOM of each configuration (in eV/atom)
+    forces: numpy.array of float
             forces with shape confs x natoms x 3 (in eV/Angst)
-    stress: list of float
+    stress: numpy.array of float
             stress tensor for each configuration (in eV/Angst^2)
         
     Notes
@@ -374,16 +378,30 @@ def extract_prop_from_cfg(filepath):
         energy = np.array(energy)
         return energy, forces, stress
     
-
     
-    
-    
-    
-def make_comparison(file1, file2, props='all', make_file=False, dir='', outfile_pref='', units=None):
+def make_comparison(is_ase1=True,
+                    is_ase2=True,
+                    structures1=None, 
+                    structures2=None, 
+                    file1=None,
+                    file2=None,
+                    props='all', 
+                    make_file=False, 
+                    dir='',
+                    outfile_pref='', 
+                    units=None):
     '''Create the comparison files for energy, forces and stress starting from the .cfg files.
     
     Parameters
     ----------
+    is_ase1, is_ase2: bool
+        - True: an (list of) ase.atoms.Atoms object(s) is expected 
+                (inside structures1/structures2) 
+        - False: the path to a .cfg files is expected (inside file1/file2)
+    structures1: ase.atoms.Atoms or list of ase.atoms.Atoms
+        (list of) ase Atoms object(s) with the true values
+    structures2: ase.atoms.Atoms or list of ase.atoms.Atoms
+        (list of) ase Atoms object(s) with the ML values
     file1: str
         PATH to the file with the true values (.cfg)
     file2: str
@@ -412,6 +430,8 @@ def make_comparison(file1, file2, props='all', make_file=False, dir='', outfile_
         
     '''
     
+    if is_ase == True:
+        assert ##### SONO ARRIVATO QUI, DEVO CONTROLLARE CHE SIANO STATE DATE DELLE STRUTTURE E CHE ABBIANO LA STELLA LUNGHEZZA
     if make_file == True:
         dir = os.path.abspath(dir)
         if not dir.endswith('/'):
@@ -435,8 +455,12 @@ def make_comparison(file1, file2, props='all', make_file=False, dir='', outfile_
     prop_numbs = dict(energy = 0, forces = 1, stress = 2)
     
     # Retrieve the data
-    ext1 = [x.flatten() for x in extract_prop(file1)]
-    ext2 = [x.flatten() for x in extract_prop(file2)]
+    if is_ase == True:
+        ext1 = [x.flatten() for x in extract_prop_from_ase(structures1)]
+        ext2 = [x.flatten() for x in extract_prop_from_ase(structures2)]
+    else:
+        ext1 = [x.flatten() for x in extract_prop_from_cfg(file1)]
+        ext2 = [x.flatten() for x in extract_prop_form_cfg(file2)]
     
     # Compute errors and write data on files
     errs = dict()
@@ -457,8 +481,6 @@ def make_comparison(file1, file2, props='all', make_file=False, dir='', outfile_
                 fl.write(text)
     return errs
 
-def make_comparison_from_ase():
-    pass
 
 def train_pot_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_set_path, dir, params, mpirun=''):
     '''Function to train the MTP model, analogous to train_pot, but the init.mtp file is created by asking the level
