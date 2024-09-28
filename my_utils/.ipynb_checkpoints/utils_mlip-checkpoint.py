@@ -226,18 +226,107 @@ def make_mtp_file(sp_count, mind, maxd, rad_bas_sz, rad_bas_type='RBChebyshev', 
     with open(outfile_path, 'w') as fl:
         fl.write(text)
 
+def extract_prop(structures=None, filepath=None):
+    '''Function to extract properties
+    
+    It can be either an (list of) ase.atoms.Atoms object(s) or a .cfg file.
+    Only one of 'structures' and 'filepath' can be different from None!
+    
+    Parameters
+    ----------
+    structures: ase.atoms.Atoms or list of ase.atoms.Atoms
+        it can and must be None only if filepath is not None
+    filepath: str
+        path to the .cfg file; it can and must be None only if structures is not None
+    
+    
+    Returns
+    -------
+    energy: numpy.array of float
+            energy PER ATOM of each configuration (in eV/atom)
+    forces: numpy.array of float
+            forces with shape confs x natoms x 3 (in eV/Angst)
+    stress: numpy.array of float
+            stress tensor for each configuration (in eV/Angst^2)
         
-        
-def extract_prop(filepath):
+    Notes
+    -----
+    The convention for the stress is that the stress tensor element are:
+    sigma = + dE/dn (n=strain) (note the sign!)
+    
+    
     '''
-    Function to extract energy (per atom), forces and stress from a set of configurations contained in
+    
+    assert any([structures != None, filepath != None]), f"Either structure or filepath must be given!"
+    assert not all([structures != None, filepath != None]), f"Either structure or filepath can be given!"
+    if structures != None:
+        if isinstance(structures, ase.atoms.Atoms()):
+            structures = [structures]
+        elif isinstance(structures, list):
+            assert all([isinstance(x) for x in structures]), \
+                   f"Some element of structures is not an ase.atoms.Atoms object!"
+        extract_ptop_from_ase(structures)
+    else:
+        extract_prop_from_cfg(filepath)
+
+        
+def extract_prop_from_ase(structures):
+    '''Function to extract energy (per atom), forces and stress from an ase trajectory
+    
+    Parameters
+    ----------
+    structures: ase.atoms.Atoms or list of ase.atoms.Atoms
+       trajectory 
+        
+    Returns
+    -------
+    energy: numpy.array of float
+            energy PER ATOM of each configuration (in eV/atom)
+    forces: numpy.array of float
+            forces with shape confs x natoms x 3 (in eV/Angst)
+    stress: numpy.array of float
+            stress tensor for each configuration (in eV/Angst^2)
+        
+    Notes
+    -----
+    The convention for the stress is that the stress tensor element are:
+    sigma = + dE/dn (n=strain) (note the sign!)
+    
+    '''
+    
+    if isinstance(structures, ase.atoms.Atoms):
+        structures = [structures]
+    energy = np.array([x.get_total_energy()/len(x) for x in structures], dtype='float')
+    forces = np.array([x.get_forces() for x in structures], dtype='float')
+    stress = np.array([x.get_stress() for x in structures], dtype='float')
+    
+    return energies, forces, stress
+    
+
+
+def extract_prop_from_cfg(filepath):
+    '''Function to extract energy (per atom), forces and stress from a set of configurations contained in
     a single .cfg file.
-    Arguments:
-    filepath(str): path to the .cfg file containing the configurations
-    Returns:
-    energy(list): energy per atom of each configuration (in eV)
-    forces(list): forces with shape confs x natoms x 3 (in eV/Angst)
-    stress(list): stress tensor for each configuration (in eV/Angst^2); convention: sigma = + dE/dn (n=strain).
+    
+    Parameters
+    ----------
+    filepath: str
+        path to the .cfg file containing the configurations
+        
+    Returns
+    -------
+    energy: numpy.array of float
+            energy PER ATOM of each configuration (in eV/atom)
+    forces: numpy.array of float
+            forces with shape confs x natoms x 3 (in eV/Angst)
+    stress: numpy.array of float
+            stress tensor for each configuration (in eV/Angst^2)
+        
+    Notes
+    -----
+    The convention for the stress is that the stress tensor element are:
+    sigma = + dE/dn (n=strain) (note the sign!)
+    
     '''
     with open(filepath, 'r') as fl:
         lines = fl.readlines()
@@ -289,31 +378,82 @@ def extract_prop(filepath):
         energy = np.array(energy)
         return energy, forces, stress
     
+    
+def make_comparison(is_ase1=True,
+                    is_ase2=True,
+                    structures1=None, 
+                    structures2=None, 
+                    file1=None,
+                    file2=None,
+                    props='all', 
+                    make_file=False, 
+                    dir='',
+                    outfile_pref='', 
+                    units=None):
+    '''Create the comparison files for energy, forces and stress starting from the .cfg files.
+    
+    Parameters
+    ----------
+    is_ase1, is_ase2: bool
+        - True: an (list of) ase.atoms.Atoms object(s) is expected 
+                (inside structures1/structures2) 
+        - False: the path to a .cfg files is expected (inside file1/file2)
+    structures1: ase.atoms.Atoms or list of ase.atoms.Atoms
+        mandatory when is_ase1 = True (ignored otherwise); (list of) ase
+        Atoms object(s) with the true values
+    structures2: ase.atoms.Atoms or list of ase.atoms.Atoms
+        mandatory when is_ase2 = True (ignored otherwise); (list of) ase
+        Atoms object(s) with the ML values
+    file1: str
+        mandatory when is_file1 = True (ignored otherwise); PATH to the
+        file with the true values (.cfg)
+    file2: str
+        mandatory when is_file1 = True (ignored otherwise); PATH to the
+        file with the true values (.cfg)
+    props: str or list of {'energy', 'forces', 'stress', 'all'}
+        if a list is given containing 'all', all three properties will be
+        considered, independent on the other elements of the list
+    make_file: bool
+        - True: create a comparison file
+    dir: str
+        directory the output file will be saved (if make_file=True)
+    outfile_pref: str
+        the output file will be named [outfile_pref][Property]_comparison.dat 
+        (if make_file=True) e.g.: with outfile_pref = 'MLIP-', for the energy 
+        the name would be: MLIP-Energy_comparison.dat 
+    units: dict, default: {'energy': 'eV/at', 'forces':'eV/Angs', 'stress':'GPa'}
+        dictionary with key-value pairs like prop-unit with prop in 
+        ['energy', 'forces', 'stress'] and value being a string with the unit
+        to print for the respective property. If None, the respective units
+        will be eV/at, eV/Angs and GPa
 
-    
-    
-    
-    
-def make_comparison(file1, file2, props='all', make_file=False, dir='', outfile_pref='', units=None):
+    Returns
+    -------
+    errs: list of float
+        [rmse, mae, R2] 
+        
     '''
-    Create the comparison files for energy, forces and stress starting from the .cfg files.
-    Arguments:
-    file1(str): PATH to the file with the true values (.cfg)
-    file2(str): PATH to the file with the ML values (.cfg)
-    props(str, list): must be one value or a list of values chosen from ['energy', 'forces', 'stress', 'all'].
-                     if a list is given containing 'all', all three properties will be considered, independent on
-                     the other elements of the list
-    make_file(bool): True: create a comparison file
-    dir(str): directory the output file will be saved (if make_file=True)
-    outfile_pref(str): the output file will be named [outfile_pref][Property]_comparison.dat (if make_file=True)
-                       e.g.: with outfile_pref = 'MLIP-', for the energy the name would be: MLIP-Energy_comparison.dat 
-    units(list): dictionary with key-value pairs like prop-unit with prop in ['energy', 'forces', 'stress']
-                 and value being a string with the unit to print for the respective property. If None, the
-                 respective units will be eV/at, eV/Angs and GPa.
-
-    Return:
-    errs(list): [rmse, mae, R2] 
-    '''
+    
+    if is_ase1 == True:
+        assert (structures1 != None), f"When is_ase1 = True, " \
+            + f"structures1 must be given!"
+        if isinstance(structures1, ase.atoms.Atoms()):
+            structures1 = [structures1]
+    else:
+        assert file1 != None, f"When is_ase1 = False, file1 must be given!"
+        file1 = Path(file1)
+        assert file1.is_file() == True, f"{file1} does is not a file!"
+        
+    if is_ase2 == True:
+        assert (structures2 != None), f"When is_ase2 = True, " \
+            + f"structures2 must be given!"
+        if isinstance(structures2, ase.atoms.Atoms()):
+            structures2 = [structures2]
+    else:
+        assert file2 != None, f"When is_ase2 = False, file2 must be given!"
+        file2 = Path(file1)
+        assert file2.is_file() == True, f"{file2} does is not a file!"
+    
     if make_file == True:
         dir = os.path.abspath(dir)
         if not dir.endswith('/'):
@@ -337,8 +477,19 @@ def make_comparison(file1, file2, props='all', make_file=False, dir='', outfile_
     prop_numbs = dict(energy = 0, forces = 1, stress = 2)
     
     # Retrieve the data
-    ext1 = [x.flatten() for x in extract_prop(file1)]
-    ext2 = [x.flatten() for x in extract_prop(file2)]
+    if is_ase1 == True:
+        ext1 = [x.flatten() for x in extract_prop_from_ase(structures1)]
+     else:
+        ext1 = [x.flatten() for x in extract_prop_from_cfg(file1)]
+         
+    if is_ase2 == True:
+        ext2 = [x.flatten() for x in extract_prop_from_ase(structures2)]
+    else:
+        ext2 = [x.flatten() for x in extract_prop_form_cfg(file2)]
+
+    assert len(ext1) == len(ext2), f"You gave a different number of "\
+        + f"true and ML structures!"
+        
     
     # Compute errors and write data on files
     errs = dict()
@@ -360,7 +511,109 @@ def make_comparison(file1, file2, props='all', make_file=False, dir='', outfile_
     return errs
 
 
+def train_pot_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_set_path, dir, params, mpirun=''):
+    '''Function to train the MTP model, analogous to train_pot, but the init.mtp file is created by asking the level
     
+        Parameters
+        ----------
+        mpirun: str
+            command for mpi or similar (e.g. 'mpirun')
+        mlip_bin: str
+            path to the MTP binary
+        untrained_pot_file_dir: str 
+            path to the directory containing the untrained mtp init files (.mtp)
+        mtp_level: {2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 21, 22, 24, 26, 28}
+            level of the mtp model to train
+        train_set_path: str 
+            path to the training set (.cfg)
+        dir: str
+            path to the directory where to run the training (and save the output)
+        params: dict 
+            dictionary containing the flags to use; these are the possibilities:
+            ene_weight: float, default=1
+                weight of energies in the fitting
+            for_weight: float, default=0.01
+                weight of forces in the fitting
+            str_weight: float, default=0.001 
+                weight of stresses in the fitting
+            sc_b_for: float, default=0
+                if >0 then configurations near equilibrium (with roughtly force < 
+                <double>) get more weight
+            val_cfg: str 
+                filename with configuration to validate
+            max_iter: int, default=1000
+                maximal number of iterations
+            cur_pot_n: str
+                if not empty, save potential on each iteration with name = cur_pot_n
+            trained_pot_name: str, default="Trained.mtp"
+                filename for trained potential.
+            bgfs_tol: float, default=1e-3
+                stop if error dropped by a factor smaller than this over 50 BFGS 
+                iterations
+            weighting: {'vibrations', 'molecules', 'structures'}, default=vibrations 
+                how to weight configuration wtih different sizes relative to each 
+                other
+            init_par: {'random', 'same'}, default='random'
+                how to initialize parameters if a potential was not pre-fitted;
+                - random: random initialization
+                - same: this is when interaction of all species is the same (more 
+                        accurate fit, but longer optimization)
+            skip_preinit: bool 
+                skip the 75 iterations done when parameters are not given
+            up_mindist: bool
+                updating the mindist parameter with actual minimal interatomic 
+                distance in the training set
+    
+    '''
+    
+    
+    def get_flags(params):
+        flags = dict(ene_weight = '--energy-weight',
+                     for_weight = '--force-weight',
+                     str_weight = '--stress-weight',
+                     sc_b_for = '--scale-by-force',
+                     val_cfg = '--valid_cfgs',
+                     max_iter = '--max-iter',
+                     cur_pot_n = '--curr-pot-name',
+                     trained_pot_name = '--trained-pot-name',
+                     bgfs_tol = '--bgfs-conv-tol',
+                     weighting = '--weighting',
+                     init_par = '--init-params',
+                     skip_preinit = '--skip-preinit',
+                     up_mindist = '--update-mindist')
+
+        cmd = ''
+        for par in list(params.keys()):
+            if par == 'skip_preinit':
+                if params[par] == True:
+                    cmd = f'{cmd} {flags[par]}'
+                continue
+            elif par == 'up_mindist':
+                if params[par] == True:
+                    cmd = f'{cmd} {flags[par]}'
+                continue
+            elif par in list(flags.keys()):
+                cmd = f'{cmd} {flags[par]}={params[par]}'         
+        return cmd
+    
+    dir = os.path.abspath(dir)
+    if not dir.endswith('/'):
+        dir += '/'
+    
+    if 'trained_pot_name' not in list(params.keys()):
+        params['trained_pot_name'] = 'pot.mtp'
+    
+    flags = get_flags(params)
+    init_name = f'{int(mtp_level):0>2d}.mtp'
+    init_path = Path(untrained_pot_file_dir).joinpath(init_name)
+    cmd = f'{mpirun} {mlip_bin} train {init_path} {train_set_path} {flags}'
+    print(cmd)
+    log_path = f'{dir}log_train'
+    err_path = f'{dir}err_train'
+    with open(log_path, 'w') as log, open(err_path, 'w') as err:
+        run(cmd.split(), cwd=dir, stdout=log, stderr=err)
+        
+        
 def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun=''):
     '''
     Function to train the MTP model
@@ -479,6 +732,74 @@ def train_pot_from_ase(mlip_bin, init_path, train_set, dir, params, mpirun=''):
               dir=dir,
               params=params,
               mpirun=mpirun)
+    
+def train_pot_from_ase_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_set, dir, params, mpirun=''):
+    '''Function to train the MTP model
+    
+    Parameters
+    ----------
+    mpirun: str
+        command for mpi or similar (e.g. 'mpirun')
+    mlip_bin: str
+        path to the MTP binary
+    untrained_pot_file_dir: str 
+        path to the directory containing the untrained mtp init files (.mtp)
+    mtp_level: {2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 21, 22, 24, 26, 28}
+        level of the mtp model to train
+    train_set: list, ase.atoms.Atoms 
+        list of ase Atoms objects; energy, forces and stresses must have been 
+        computed and stored in each Atoms object
+    dir: str
+        path to the directory where to run the training (and save the output)
+    params: dict 
+        dictionary containing the flags to use; these are the possibilities:
+        ene_weight: float, default=1
+            weight of energies in the fitting
+        for_weight: float, default=0.01
+            weight of forces in the fitting
+        str_weight: float, default=0.001 
+            weight of stresses in the fitting
+        sc_b_for: float, default=0
+            if >0 then configurations near equilibrium (with roughtly force < 
+            <double>) get more weight
+        val_cfg: str 
+            filename with configuration to validate
+        max_iter: int, default=1000
+            maximal number of iterations
+        cur_pot_n: str
+            if not empty, save potential on each iteration with name = cur_pot_n
+        trained_pot_name: str, default="Trained.mtp"
+            filename for trained potential.
+        bgfs_tol: float, default=1e-3
+            stop if error dropped by a factor smaller than this over 50 BFGS 
+            iterations
+        weighting: {'vibrations', 'molecules', 'structures'}, default=vibrations 
+            how to weight configuration wtih different sizes relative to each 
+            other
+        init_par: {'random', 'same'}, default='random'
+            how to initialize parameters if a potential was not pre-fitted;
+            - random: random initialization
+            - same: this is when interaction of all species is the same (more 
+                    accurate fit, but longer optimization)
+        skip_preinit: bool 
+            skip the 75 iterations done when parameters are not given
+        up_mindist: bool
+            updating the mindist parameter with actual minimal interatomic 
+            distance in the training set
+    '''
+    cfg_path = Path(dir).joinpath('TrainSet.cfg')
+    conv_ase_to_mlip2(atoms=train_set,
+                      out_path=cfg_path,
+                      props=True)
+    
+    train_pot_tmp(mlip_bin=mlip_bin,
+                  untrained_pot_file_dir=untrained_pot_file_dir,
+                  mtp_level=mtp_level,
+                  train_set_path=cfg_path, 
+                  dir=dir,
+                  params=params,
+                  mpirun=mpirun)
+    
 
 def pot_from_ini(fpath):
     with open(fpath, 'r') as fl:
@@ -525,15 +846,35 @@ def calc_efs_from_ase(mlip_bin, atoms, mpirun='', pot_path='pot.mtp', cfg_files=
     '''
     Function to calculate energies, forces, and stresses for the configurations in an ASE trajectory with
     pot.mtp, writing the result into the same trajectory (plus out.cfg, if wanted).
-    Arguments:
-    mlip_bin(str): path to the mlip binary file
-    confs_path(str): path to the file containing the configurations on which compute efs (.cfg)
-    pot_path(str): path to the potential file (.mtp)
-    cfg_files(bool): False = the cfg files used to interface to MTP are deleted 
-    out_path(str): path of the cfg output file (.cfg) (relevant only if cfg_file = True)
-    dir(str): directory where to calculate efs
-    write_conf(bool): True = write the trajectory into a file
-    outconf_name(str): name of the file where the trajectory is writetn (only with write_conf=True); by default overwrites.
+    
+    Paramters
+    ---------
+    mlip_bin: str
+        path to the mlip binary file
+    confs_path: str
+        path to the file containing the configurations on which compute efs
+        (.cfg)
+    pot_path: str
+         path to the potential file (.mtp)
+    cfg_files: bool
+         - False = the cfg files used to interface to MTP are deleted 
+    out_path: str
+         path of the cfg output file (.cfg) (relevant only if cfg_file = 
+         True)
+    dir: str
+         directory where to calculate efs
+    write_conf: bool
+         - True = write the trajectory into a file
+    outconf_name: str
+        name of the file where the trajectory is written (only with 
+        write_conf=True); by default overwrites.
+        
+    Returns
+    -------
+    atoms: list of ase.atoms.Atoms
+        trajectory containing the same input structures with their 
+        calculated properties stored
+
     '''
     
     

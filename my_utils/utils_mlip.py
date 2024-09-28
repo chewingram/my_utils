@@ -399,13 +399,17 @@ def make_comparison(is_ase1=True,
                 (inside structures1/structures2) 
         - False: the path to a .cfg files is expected (inside file1/file2)
     structures1: ase.atoms.Atoms or list of ase.atoms.Atoms
-        (list of) ase Atoms object(s) with the true values
+        mandatory when is_ase1 = True (ignored otherwise); (list of) ase
+        Atoms object(s) with the true values
     structures2: ase.atoms.Atoms or list of ase.atoms.Atoms
-        (list of) ase Atoms object(s) with the ML values
+        mandatory when is_ase2 = True (ignored otherwise); (list of) ase
+        Atoms object(s) with the ML values
     file1: str
-        PATH to the file with the true values (.cfg)
+        mandatory when is_file1 = True (ignored otherwise); PATH to the
+        file with the true values (.cfg)
     file2: str
-        PATH to the file with the ML values (.cfg)
+        mandatory when is_file1 = True (ignored otherwise); PATH to the
+        file with the true values (.cfg)
     props: str or list of {'energy', 'forces', 'stress', 'all'}
         if a list is given containing 'all', all three properties will be
         considered, independent on the other elements of the list
@@ -430,8 +434,26 @@ def make_comparison(is_ase1=True,
         
     '''
     
-    if is_ase == True:
-        assert ##### SONO ARRIVATO QUI, DEVO CONTROLLARE CHE SIANO STATE DATE DELLE STRUTTURE E CHE ABBIANO LA STELLA LUNGHEZZA
+    if is_ase1 == True:
+        assert (structures1 != None), f"When is_ase1 = True, " \
+            + f"structures1 must be given!"
+        if isinstance(structures1, ase.atoms.Atoms()):
+            structures1 = [structures1]
+    else:
+        assert file1 != None, f"When is_ase1 = False, file1 must be given!"
+        file1 = Path(file1)
+        assert file1.is_file() == True, f"{file1} does is not a file!"
+        
+    if is_ase2 == True:
+        assert (structures2 != None), f"When is_ase2 = True, " \
+            + f"structures2 must be given!"
+        if isinstance(structures2, ase.atoms.Atoms()):
+            structures2 = [structures2]
+    else:
+        assert file2 != None, f"When is_ase2 = False, file2 must be given!"
+        file2 = Path(file1)
+        assert file2.is_file() == True, f"{file2} does is not a file!"
+    
     if make_file == True:
         dir = os.path.abspath(dir)
         if not dir.endswith('/'):
@@ -455,12 +477,19 @@ def make_comparison(is_ase1=True,
     prop_numbs = dict(energy = 0, forces = 1, stress = 2)
     
     # Retrieve the data
-    if is_ase == True:
+    if is_ase1 == True:
         ext1 = [x.flatten() for x in extract_prop_from_ase(structures1)]
+     else:
+        ext1 = [x.flatten() for x in extract_prop_from_cfg(file1)]
+         
+    if is_ase2 == True:
         ext2 = [x.flatten() for x in extract_prop_from_ase(structures2)]
     else:
-        ext1 = [x.flatten() for x in extract_prop_from_cfg(file1)]
         ext2 = [x.flatten() for x in extract_prop_form_cfg(file2)]
+
+    assert len(ext1) == len(ext2), f"You gave a different number of "\
+        + f"true and ML structures!"
+        
     
     # Compute errors and write data on files
     errs = dict()
