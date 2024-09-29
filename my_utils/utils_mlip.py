@@ -442,7 +442,7 @@ def make_comparison(is_ase1=True,
     else:
         assert file1 != None, f"When is_ase1 = False, file1 must be given!"
         file1 = Path(file1)
-        assert file1.is_file() == True, f"{file1} does is not a file!"
+        assert file1.is_file() == True, f"{file1.absolute} is not a file!"
         
     if is_ase2 == True:
         assert (structures2 != None), f"When is_ase2 = True, " \
@@ -452,7 +452,7 @@ def make_comparison(is_ase1=True,
     else:
         assert file2 != None, f"When is_ase2 = False, file2 must be given!"
         file2 = Path(file1)
-        assert file2.is_file() == True, f"{file2} does is not a file!"
+        assert file2.is_file() == True, f"{file2.absolute} is not a file!"
     
     if make_file == True:
         dir = os.path.abspath(dir)
@@ -479,7 +479,7 @@ def make_comparison(is_ase1=True,
     # Retrieve the data
     if is_ase1 == True:
         ext1 = [x.flatten() for x in extract_prop_from_ase(structures1)]
-     else:
+    else:
         ext1 = [x.flatten() for x in extract_prop_from_cfg(file1)]
          
     if is_ase2 == True:
