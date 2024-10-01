@@ -888,7 +888,8 @@ def calc_efs_from_ase(mlip_bin, atoms, mpirun='', pot_path='pot.mtp', cfg_files=
     calc_efs(mlip_bin, mpirun=mpirun, confs_path=cfg_traj, pot_path=pot_path, out_path=f'{dir}{out_path}', dir=dir)
     
     # extract the properties from the results
-    energy, forces, stress = extract_prop(f'{dir}{out_path}')
+    structures = read(f'{dir}{out_path}', index=':')
+    energy, forces, stress = extract_prop(structures)
     
     # for each configuration create the SinglePoint calculator and assign it, then "compute" the properties
     for i, atom in enumerate(atoms):
