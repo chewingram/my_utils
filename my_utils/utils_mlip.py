@@ -266,7 +266,7 @@ def extract_prop(structures=None, filepath=None):
         elif isinstance(structures, list):
             assert all([isinstance(x, Atoms) for x in structures]), \
                    f"Some element of structures is not an ase.atoms.Atoms object!"
-        extract_ptop_from_ase(structures)
+        extract_prop_from_ase(structures)
     else:
         extract_prop_from_cfg(filepath)
 
