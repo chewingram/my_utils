@@ -266,9 +266,9 @@ def extract_prop(structures=None, filepath=None):
         elif isinstance(structures, list):
             assert all([isinstance(x, Atoms) for x in structures]), \
                    f"Some element of structures is not an ase.atoms.Atoms object!"
-        extract_prop_from_ase(structures)
+        return extract_prop_from_ase(structures)
     else:
-        extract_prop_from_cfg(filepath)
+        return extract_prop_from_cfg(filepath)
 
         
 def extract_prop_from_ase(structures):
@@ -848,7 +848,7 @@ def calc_efs_from_ase(mlip_bin, atoms, mpirun='', pot_path='pot.mtp', cfg_files=
     Function to calculate energies, forces, and stresses for the configurations in an ASE trajectory with
     pot.mtp, writing the result into the same trajectory (plus out.cfg, if wanted).
     
-    Paramters
+    Parameters
     ---------
     mlip_bin: str
         path to the mlip binary file
@@ -888,9 +888,8 @@ def calc_efs_from_ase(mlip_bin, atoms, mpirun='', pot_path='pot.mtp', cfg_files=
     calc_efs(mlip_bin, mpirun=mpirun, confs_path=cfg_traj, pot_path=pot_path, out_path=f'{dir}{out_path}', dir=dir)
     
     # extract the properties from the results
-    structures = read(f'{dir}{out_path}', index=':')
-    energy, forces, stress = extract_prop(structures)
-    
+    energy, forces, stress = extract_prop(filepath=f'{dir}{out_path}')
+
     # for each configuration create the SinglePoint calculator and assign it, then "compute" the properties
     for i, atom in enumerate(atoms):
         calc = SinglePointCalculator(atom, energy=energy[i], forces=forces[i], stress=stress[i])
