@@ -87,7 +87,7 @@ def conv_ase_to_mlip2(atoms, out_path, props=True):
     props(bool): if True energy, stress and forces will be copied too (they must have been computed for each configuration in
                  in the trajectory!); if False no property will be copied.
     '''
-    if isinstance(atoms, ase.atoms.Atoms):
+    if isinstance(atoms, Atoms):
         atoms = [atoms]
         
     text = ''
@@ -261,10 +261,10 @@ def extract_prop(structures=None, filepath=None):
     assert any([structures != None, filepath != None]), f"Either structure or filepath must be given!"
     assert not all([structures != None, filepath != None]), f"Either structure or filepath can be given!"
     if structures != None:
-        if isinstance(structures, ase.atoms.Atoms()):
+        if isinstance(structures, Atoms):
             structures = [structures]
         elif isinstance(structures, list):
-            assert all([isinstance(x) for x in structures]), \
+            assert all([isinstance(x, Atoms) for x in structures]), \
                    f"Some element of structures is not an ase.atoms.Atoms object!"
         extract_ptop_from_ase(structures)
     else:
@@ -295,7 +295,7 @@ def extract_prop_from_ase(structures):
     
     '''
     
-    if isinstance(structures, ase.atoms.Atoms):
+    if isinstance(structures, Atoms):
         structures = [structures]
     energy = np.array([x.get_total_energy()/len(x) for x in structures], dtype='float')
     forces = np.array([x.get_forces() for x in structures], dtype='float')
@@ -438,7 +438,7 @@ def make_comparison(is_ase1=True,
     if is_ase1 == True:
         assert (structures1 != None), f"When is_ase1 = True, " \
             + f"structures1 must be given!"
-        if isinstance(structures1, ase.atoms.Atoms()):
+        if isinstance(structures1, Atoms):
             structures1 = [structures1]
     else:
         assert file1 != None, f"When is_ase1 = False, file1 must be given!"
@@ -448,7 +448,7 @@ def make_comparison(is_ase1=True,
     if is_ase2 == True:
         assert (structures2 != None), f"When is_ase2 = True, " \
             + f"structures2 must be given!"
-        if isinstance(structures2, ase.atoms.Atoms()):
+        if isinstance(structures2, Atoms):
             structures2 = [structures2]
     else:
         assert file2 != None, f"When is_ase2 = False, file2 must be given!"
