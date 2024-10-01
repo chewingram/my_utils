@@ -12,7 +12,7 @@ from .Graphics_matplotlib import Histogram
 
 
 from ase.io import read, write
-#from ase import Atoms
+from ase import Atoms
 import ase.atoms
 from ase.calculators.singlepoint import SinglePointCalculator
 
@@ -87,7 +87,7 @@ def conv_ase_to_mlip2(atoms, out_path, props=True):
     props(bool): if True energy, stress and forces will be copied too (they must have been computed for each configuration in
                  in the trajectory!); if False no property will be copied.
     '''
-    if isinstance(atoms, Atoms):
+    if isinstance(atoms, ase.atoms.Atoms):
         atoms = [atoms]
         
     text = ''
