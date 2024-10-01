@@ -12,7 +12,8 @@ from .Graphics_matplotlib import Histogram
 
 
 from ase.io import read, write
-from ase import Atoms
+#from ase import Atoms
+import ase.atoms
 from ase.calculators.singlepoint import SinglePointCalculator
 
 from numbers import Number
