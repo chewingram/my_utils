@@ -2,7 +2,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 import numpy as np
-
+from pathlib import Path
 import os
 
 import sys
@@ -511,8 +511,31 @@ def make_comparison(is_ase1=True,
                 fl.write(text)
     return errs
 
+def set_level_to_pot_file(trained_pot_file_path, mtp_level):
+    fp = Path(trained_pot_file_path)
+    assert fp.is_file(), f"{fp.absolute} is not a regular file!"
+    assert isinstance(mtp_level, int) or \
+           isinstance(mtp_level, float), f"mtp_level must be an integer!"
+    mtp_level = int(mtp_level) # in case it's float
 
-def train_pot_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_set_path, dir, params, mpirun=''):
+    with open(fp, 'r') as fl:
+        lines = fl.readlines()
+    with open(fp, 'w') as fl:
+        for line in lines:
+            if 'potential_name' in line:
+                line = f'potential_name = MTP_{mtp_level}'
+        fl.writelines(lines)
+
+def train_pot_tmp(mlip_bin, 
+                  untrained_pot_file_dir,
+                  mtp_level,
+                  species_count,
+                  radial_basis_size,
+                  radial_basis_type,
+                  train_set_path,
+                  dir,
+                  params,
+                  mpirun=''):
     '''Function to train the MTP model, analogous to train_pot, but the init.mtp file is created by asking the level
     
         Parameters
@@ -525,6 +548,12 @@ def train_pot_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_set_path, d
             path to the directory containing the untrained mtp init files (.mtp)
         mtp_level: {2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 21, 22, 24, 26, 28}
             level of the mtp model to train
+        species_count: int
+            number of elements present in the dataset
+        radial_basis_size: int, default=8
+            number of basis functions to use for the radial part
+        radial_basis_type: {'RBChebyshev', ???}, default='RBChebyshev'
+            type of basis functions to use for the radial part
         train_set_path: str 
             path to the training set (.cfg)
         dir: str
@@ -548,7 +577,7 @@ def train_pot_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_set_path, d
                 if not empty, save potential on each iteration with name = cur_pot_n
             trained_pot_name: str, default="Trained.mtp"
                 filename for trained potential.
-            bgfs_tol: float, default=1e-3
+            bfgs_tol: float, default=1e-3
                 stop if error dropped by a factor smaller than this over 50 BFGS 
                 iterations
             weighting: {'vibrations', 'molecules', 'structures'}, default=vibrations 
@@ -577,7 +606,7 @@ def train_pot_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_set_path, d
                      max_iter = '--max-iter',
                      cur_pot_n = '--curr-pot-name',
                      trained_pot_name = '--trained-pot-name',
-                     bgfs_tol = '--bgfs-conv-tol',
+                     bfgs_tol = '--bfgs-conv-tol',
                      weighting = '--weighting',
                      init_par = '--init-params',
                      skip_preinit = '--skip-preinit',
@@ -603,17 +632,25 @@ def train_pot_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_set_path, d
     
     if 'trained_pot_name' not in list(params.keys()):
         params['trained_pot_name'] = 'pot.mtp'
-    
+    train_set_path
     flags = get_flags(params)
-    init_name = f'{int(mtp_level):0>2d}.mtp'
-    init_path = Path(untrained_pot_file_dir).joinpath(init_name)
+    make_mtp_file(sp_count=species_count,
+                  mind=params['min_dist'],
+                  maxd=params['max_dist'],
+                  rad_bas_sz=radial_basis_size,
+                  rad_bas_type=radial_basis_type, 
+                  lev=mtp_level, 
+                  mtps_dir=untrained_pot_file_dir,
+                  wdir=dir, 
+                  out_name='init.mtp')
+    init_path = Path(dir).joinpath('init.mtp')
     cmd = f'{mpirun} {mlip_bin} train {init_path} {train_set_path} {flags}'
     print(cmd)
     log_path = f'{dir}log_train'
     err_path = f'{dir}err_train'
     with open(log_path, 'w') as log, open(err_path, 'w') as err:
         run(cmd.split(), cwd=dir, stdout=log, stderr=err)
-        
+    set_level_to_pot_file(trained_pot_file_path=params['trained_pot_name'], mtp_level=mtp_level)    
         
 def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun=''):
     '''
@@ -634,7 +671,7 @@ def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun=''):
         max_iter(int): maximal number of iterations. Default=1000
         cur_pot_n(str): if not empty, save potential on each iteration with name = cur_pot_n.
         tr_pot_n(str): filename for trained potential. Default=Trained.mtp_
-        bgfs_tol(float): stop if error dropped by a factor smaller than this over 50 BFGS iterations. 
+        bfgs_tol(float): stop if error dropped by a factor smaller than this over 50 BFGS iterations. 
                          Default=1e-3
         weighting(str): how to weight configuration wtih different sizes relative to each other. 
                    Default=vibrations. Other=molecules, structures.
@@ -655,7 +692,7 @@ def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun=''):
                      max_iter = '--max-iter',
                      cur_pot_n = '--curr-pot-name',
                      tr_pot_n = '--trained-pot-name',
-                     bgfs_tol = '--bgfs-conv-tol',
+                     bfgs_tol = '--bfgs-conv-tol',
                      weighting = '--weighting',
                      init_par = '--init-params',
                      skip_preinit = '--skip-preinit',
@@ -691,7 +728,9 @@ def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun=''):
     err_path = f'{dir}err_train'
     with open(log_path, 'w') as log, open(err_path, 'w') as err:
         run(cmd.split(), cwd=dir, stdout=log, stderr=err)
-        
+    set_level_to_pot_file(trained_pot_file_path=params['trained_pot_name'], mtp_level=mtp_level)
+
+
 def train_pot_from_ase(mlip_bin, init_path, train_set, dir, params, mpirun=''):
     '''
     Function to train the MTP model
@@ -711,7 +750,7 @@ def train_pot_from_ase(mlip_bin, init_path, train_set, dir, params, mpirun=''):
         max_iter(int): maximal number of iterations. Default=1000
         cur_pot_n(str): if not empty, save potential on each iteration with name = cur_pot_n.
         tr_pot_n(str): filename for trained potential. Default=Trained.mtp_
-        bgfs_tol(float): stop if error dropped by a factor smaller than this over 50 BFGS iterations. 
+        bfgs_tol(float): stop if error dropped by a factor smaller than this over 50 BFGS iterations. 
                          Default=1e-3
         weighting(str): how to weight configuration wtih different sizes relative to each other. 
                    Default=vibrations. Other=molecules, structures.
@@ -734,7 +773,15 @@ def train_pot_from_ase(mlip_bin, init_path, train_set, dir, params, mpirun=''):
               params=params,
               mpirun=mpirun)
     
-def train_pot_from_ase_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_set, dir, params, mpirun=''):
+def train_pot_from_ase_tmp(mlip_bin,
+                           untrained_pot_file_dir,
+                           mtp_level,
+                           radial_basis_size,
+                           radial_basis_type,
+                           train_set,
+                           dir,
+                           params,
+                           mpirun=''):
     '''Function to train the MTP model
     
     Parameters
@@ -771,7 +818,7 @@ def train_pot_from_ase_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_se
             if not empty, save potential on each iteration with name = cur_pot_n
         trained_pot_name: str, default="Trained.mtp"
             filename for trained potential.
-        bgfs_tol: float, default=1e-3
+        bfgs_tol: float, default=1e-3
             stop if error dropped by a factor smaller than this over 50 BFGS 
             iterations
         weighting: {'vibrations', 'molecules', 'structures'}, default=vibrations 
@@ -792,11 +839,14 @@ def train_pot_from_ase_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_se
     conv_ase_to_mlip2(atoms=train_set,
                       out_path=cfg_path,
                       props=True)
-    
+    species_count = len(list(set(np.array([x.get_chemical_symbols() for  x in train_set]).flatten())))
     train_pot_tmp(mlip_bin=mlip_bin,
                   untrained_pot_file_dir=untrained_pot_file_dir,
                   mtp_level=mtp_level,
-                  train_set_path=cfg_path, 
+                  species_count=species_count,
+                  radial_basis_size=radial_basis_size,
+                  radial_basis_type=radial_basis_type,
+                  train_set_path=cfg_path.absolute(), 
                   dir=dir,
                   params=params,
                   mpirun=mpirun)
@@ -920,3 +970,23 @@ def find_min_dist(trajectory):
         mindist.append(dist.min())
     return min(mindist)
 
+
+def make_ini_for_lammps(pot_file_path, out_file_path):
+    '''Function to create the ini file for lammps
+    
+    Parameters
+    ----------
+
+    pot_file_path: str
+        path to the .mtp file, that will be printed in the
+        ini file for lammps
+    out_file_path: str
+        path of the ini file to generate
+
+    '''
+    pot_file_path = Path(pot_file_path)
+    txt = f'mtp-filename {pot_file_path.absolute()}\n'
+    txt += f"select FALSE"
+    out_file_path = Path(out_file_path)
+    with open(out_file_path.absolute(), 'w') as fl:
+        fl.writelines(txt)
