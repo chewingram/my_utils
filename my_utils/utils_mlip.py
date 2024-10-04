@@ -200,10 +200,8 @@ def make_mtp_file(sp_count, mind, maxd, rad_bas_sz, rad_bas_type='RBChebyshev', 
     if not mtps_dir.endswith('/'):
         mtps_dir += '/'
     
-    wdir = os.path.abspath(wdir)
-    if not wdir.endswith('/'):
-        wdir += '/'
-        
+    wdir = Path(wdir)
+
     lev = int(lev)
     src_name = f'{lev:0>2d}.mtp'
     src_path = f'{mtps_dir}{src_name}'
@@ -222,9 +220,9 @@ def make_mtp_file(sp_count, mind, maxd, rad_bas_sz, rad_bas_type='RBChebyshev', 
             lines[i] = f'\tmax_dist = {maxd}\n'
         elif 'radial_basis_size' in line:
             lines[i] = f'\tradial_basis_size = {rad_bas_sz}\n'
-    outfile_path = f'{wdir}{out_name}'
+    outfile_path = wdir.joinpath(out_name)
     text = from_list_to_text(lines)
-    with open(outfile_path, 'w') as fl:
+    with open(outfile_path.absolute(), 'w') as fl:
         fl.write(text)
 
 def extract_prop(structures=None, filepath=None):
@@ -443,7 +441,7 @@ def make_comparison(is_ase1=True,
     else:
         assert file1 != None, f"When is_ase1 = False, file1 must be given!"
         file1 = Path(file1)
-        assert file1.is_file() == True, f"{file1.absolute} is not a file!"
+        assert file1.is_file() == True, f"{file1.absolute()} is not a file!"
         
     if is_ase2 == True:
         assert (structures2 != None), f"When is_ase2 = True, " \
@@ -453,7 +451,7 @@ def make_comparison(is_ase1=True,
     else:
         assert file2 != None, f"When is_ase2 = False, file2 must be given!"
         file2 = Path(file1)
-        assert file2.is_file() == True, f"{file2.absolute} is not a file!"
+        assert file2.is_file() == True, f"{file2.absolute()} is not a file!"
     
     if make_file == True:
         dir = os.path.abspath(dir)
@@ -513,17 +511,16 @@ def make_comparison(is_ase1=True,
 
 def set_level_to_pot_file(trained_pot_file_path, mtp_level):
     fp = Path(trained_pot_file_path)
-    assert fp.is_file(), f"{fp.absolute} is not a regular file!"
+    assert fp.is_file(), f"{fp.absolute()} is not a regular file!"
     assert isinstance(mtp_level, int) or \
            isinstance(mtp_level, float), f"mtp_level must be an integer!"
     mtp_level = int(mtp_level) # in case it's float
-
     with open(fp, 'r') as fl:
         lines = fl.readlines()
     with open(fp, 'w') as fl:
-        for line in lines:
+        for i, line in enumerate(lines):
             if 'potential_name' in line:
-                line = f'potential_name = MTP_{mtp_level}'
+                lines[i] = f'potential_name = MTP_{mtp_level}\n'
         fl.writelines(lines)
 
 def train_pot_tmp(mlip_bin, 
@@ -626,9 +623,7 @@ def train_pot_tmp(mlip_bin,
                 cmd = f'{cmd} {flags[par]}={params[par]}'         
         return cmd
     
-    dir = os.path.abspath(dir)
-    if not dir.endswith('/'):
-        dir += '/'
+    dir = Path(dir)
     
     if 'trained_pot_name' not in list(params.keys()):
         params['trained_pot_name'] = 'pot.mtp'
@@ -643,14 +638,13 @@ def train_pot_tmp(mlip_bin,
                   mtps_dir=untrained_pot_file_dir,
                   wdir=dir, 
                   out_name='init.mtp')
-    init_path = Path(dir).joinpath('init.mtp')
+    init_path = Path(dir).joinpath('init.mtp').absolute()
     cmd = f'{mpirun} {mlip_bin} train {init_path} {train_set_path} {flags}'
-    print(cmd)
-    log_path = f'{dir}log_train'
-    err_path = f'{dir}err_train'
+    log_path = dir.joinpath('log_train')
+    err_path =dir.joinpath('err_train')
     with open(log_path, 'w') as log, open(err_path, 'w') as err:
         run(cmd.split(), cwd=dir, stdout=log, stderr=err)
-    set_level_to_pot_file(trained_pot_file_path=params['trained_pot_name'], mtp_level=mtp_level)    
+    set_level_to_pot_file(trained_pot_file_path=dir.joinpath(params['trained_pot_name']).absolute(), mtp_level=mtp_level)    
         
 def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun=''):
     '''
@@ -714,21 +708,18 @@ def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun=''):
     
     
     
-    dir = os.path.abspath(dir)
-    if not dir.endswith('/'):
-        dir += '/'
+    dir = Path(dir) 
     
     if 'tr_pot_n' not in list(params.keys()):
         params['tr_pot_n'] = 'pot.mtp'
     
     flags = get_flags(params)
     cmd = f'{mpirun} {mlip_bin} train {init_path} {train_set_path} {flags}'
-    print(cmd)
     log_path = f'{dir}log_train'
     err_path = f'{dir}err_train'
     with open(log_path, 'w') as log, open(err_path, 'w') as err:
         run(cmd.split(), cwd=dir, stdout=log, stderr=err)
-    set_level_to_pot_file(trained_pot_file_path=params['trained_pot_name'], mtp_level=mtp_level)
+    set_level_to_pot_file(trained_pot_file_path=dir.joinpath(params['trained_pot_name']), mtp_level=mtp_level)
 
 
 def train_pot_from_ase(mlip_bin, init_path, train_set, dir, params, mpirun=''):
@@ -840,6 +831,7 @@ def train_pot_from_ase_tmp(mlip_bin,
                       out_path=cfg_path,
                       props=True)
     species_count = len(list(set(np.array([x.get_chemical_symbols() for  x in train_set]).flatten())))
+    print('inside train_pot_from_ase_tmp calling for train_pot_tmp')
     train_pot_tmp(mlip_bin=mlip_bin,
                   untrained_pot_file_dir=untrained_pot_file_dir,
                   mtp_level=mtp_level,
