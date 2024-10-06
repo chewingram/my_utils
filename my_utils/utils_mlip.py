@@ -526,6 +526,8 @@ def set_level_to_pot_file(trained_pot_file_path, mtp_level):
 def train_pot_tmp(mlip_bin, 
                   untrained_pot_file_dir,
                   mtp_level,
+                  min_dist,
+                  max_dist,
                   species_count,
                   radial_basis_size,
                   radial_basis_type,
@@ -545,6 +547,10 @@ def train_pot_tmp(mlip_bin,
             path to the directory containing the untrained mtp init files (.mtp)
         mtp_level: {2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 21, 22, 24, 26, 28}
             level of the mtp model to train
+        min_dist: float
+            minimum distance between atoms in the system (unit: Angstrom)
+        max_dist: float
+            cutoff radius for the radial part (unit: Angstrom)
         species_count: int
             number of elements present in the dataset
         radial_basis_size: int, default=8
@@ -627,11 +633,11 @@ def train_pot_tmp(mlip_bin,
     
     if 'trained_pot_name' not in list(params.keys()):
         params['trained_pot_name'] = 'pot.mtp'
-    train_set_path
+    train_set_path = Path(train_set_path)
     flags = get_flags(params)
     make_mtp_file(sp_count=species_count,
-                  mind=params['min_dist'],
-                  maxd=params['max_dist'],
+                  mind=min_dist,
+                  maxd=max_dist,
                   rad_bas_sz=radial_basis_size,
                   rad_bas_type=radial_basis_type, 
                   lev=mtp_level, 
@@ -639,7 +645,7 @@ def train_pot_tmp(mlip_bin,
                   wdir=dir, 
                   out_name='init.mtp')
     init_path = Path(dir).joinpath('init.mtp').absolute()
-    cmd = f'{mpirun} {mlip_bin} train {init_path} {train_set_path} {flags}'
+    cmd = f'{mpirun} {mlip_bin.absolute()} train {init_path.absolute()} {train_set_path.absolute()} {flags}'
     log_path = dir.joinpath('log_train')
     err_path =dir.joinpath('err_train')
     with open(log_path, 'w') as log, open(err_path, 'w') as err:
@@ -767,6 +773,8 @@ def train_pot_from_ase(mlip_bin, init_path, train_set, dir, params, mpirun=''):
 def train_pot_from_ase_tmp(mlip_bin,
                            untrained_pot_file_dir,
                            mtp_level,
+                           min_dist,
+                           max_dist,
                            radial_basis_size,
                            radial_basis_type,
                            train_set,
@@ -785,6 +793,10 @@ def train_pot_from_ase_tmp(mlip_bin,
         path to the directory containing the untrained mtp init files (.mtp)
     mtp_level: {2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 21, 22, 24, 26, 28}
         level of the mtp model to train
+    min_dist: float
+            minimum distance between atoms in the system (unit: Angstrom)
+    max_dist: float
+            cutoff radius for the radial part (unit: Angstrom)
     train_set: list, ase.atoms.Atoms 
         list of ase Atoms objects; energy, forces and stresses must have been 
         computed and stored in each Atoms object
@@ -836,6 +848,8 @@ def train_pot_from_ase_tmp(mlip_bin,
                   untrained_pot_file_dir=untrained_pot_file_dir,
                   mtp_level=mtp_level,
                   species_count=species_count,
+                  min_dist=min_dist,
+                  max_dist=max_dist,
                   radial_basis_size=radial_basis_size,
                   radial_basis_type=radial_basis_type,
                   train_set_path=cfg_path.absolute(), 
