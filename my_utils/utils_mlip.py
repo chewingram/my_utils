@@ -645,7 +645,7 @@ def train_pot_tmp(mlip_bin,
                   wdir=dir, 
                   out_name='init.mtp')
     init_path = Path(dir).joinpath('init.mtp').absolute()
-    cmd = f'{mpirun} {mlip_bin.absolute()} train {init_path.absolute()} {train_set_path.absolute()} {flags}'
+    cmd = f'{mpirun} {Path(mlip_bin).absolute()} train {init_path.absolute()} {train_set_path.absolute()} {flags}'
     log_path = dir.joinpath('log_train')
     err_path =dir.joinpath('err_train')
     with open(log_path, 'w') as log, open(err_path, 'w') as err:
