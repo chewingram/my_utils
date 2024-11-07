@@ -4,11 +4,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
 import os
+import importlib.resources
+import argparse
 
 import sys
 
 from .utils import data_reader, cap_first, repeat, warn, from_list_to_text, mae, rmse, R2, low_first, path
 from .Graphics_matplotlib import Histogram
+
 
 
 from ase.io import read, write
@@ -670,7 +673,7 @@ def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun=''):
         val_cfg(str):  filename with configuration to validate
         max_iter(int): maximal number of iterations. Default=1000
         cur_pot_n(str): if not empty, save potential on each iteration with name = cur_pot_n.
-        tr_pot_n(str): filename for trained potential. Default=Trained.mtp_
+        trained_pot_name(str): filename for trained potential. Default=Trained.mtp_
         bfgs_tol(float): stop if error dropped by a factor smaller than this over 50 BFGS iterations. 
                          Default=1e-3
         weighting(str): how to weight configuration wtih different sizes relative to each other. 
@@ -691,7 +694,7 @@ def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun=''):
                      val_cfg = '--valid_cfgs',
                      max_iter = '--max-iter',
                      cur_pot_n = '--curr-pot-name',
-                     tr_pot_n = '--trained-pot-name',
+                     trained_pot_name = '--trained-pot-name',
                      bfgs_tol = '--bfgs-conv-tol',
                      weighting = '--weighting',
                      init_par = '--init-params',
@@ -716,8 +719,8 @@ def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun=''):
     
     dir = Path(dir) 
     
-    if 'tr_pot_n' not in list(params.keys()):
-        params['tr_pot_n'] = 'pot.mtp'
+    if 'trained_pot_name' not in list(params.keys()):
+        params['trained_pot_name'] = 'pot.mtp'
     
     flags = get_flags(params)
     cmd = f'{mpirun} {mlip_bin} train {init_path} {train_set_path} {flags}'
@@ -746,7 +749,7 @@ def train_pot_from_ase(mlip_bin, init_path, train_set, dir, params, mpirun=''):
         val_cfg(str):  filename with configuration to validate
         max_iter(int): maximal number of iterations. Default=1000
         cur_pot_n(str): if not empty, save potential on each iteration with name = cur_pot_n.
-        tr_pot_n(str): filename for trained potential. Default=Trained.mtp_
+        trained_pot_name(str): filename for trained potential. Default=Trained.mtp_
         bfgs_tol(float): stop if error dropped by a factor smaller than this over 50 BFGS iterations. 
                          Default=1e-3
         weighting(str): how to weight configuration wtih different sizes relative to each other. 
@@ -996,3 +999,260 @@ def make_ini_for_lammps(pot_file_path, out_file_path):
     out_file_path = Path(out_file_path)
     with open(out_file_path.absolute(), 'w') as fl:
         fl.writelines(txt)
+
+        
+def make_md(mode='interactive', fpath=None):
+    '''Function to set the folders and scripts for the usual MD (NPT + NVT) run
+    
+    Parameters
+    ----------
+    
+    mode: {'interactive', 'from_file'}
+        - interactive: the input will be asked to the user
+        - from_file: the input will be extracted from a file
+    fpath: str
+        path to the file containing the instructions
+        
+    '''
+    parser = argparse.ArgumentParser(description="make_md script!")
+    
+    parser.add_argument("mode", type=str, default='interactive', help="Mode of using this tool:\n\t- interactive: the input will be asked to the user\n\t- from_file: the input will be extracted from a file")
+    parser.add_argument("--fpath", type=str, default=None, help="path to the file containing the instructions")
+    
+    args = parser.parse_args()
+    
+    mode = args.mode
+    fpath = Path(args.fpath).absolute()
+    
+    if mode not in ['interactive', 'from_file']:
+        raise ValueError('The parameter "mode" must be either "interactive" or "from_file"')
+    if mode == 'from_file' and fpath == None:
+        raise ValueError('When "mode" = "from_file" a file path must be passed as "fpath"')
+
+        
+    ######## FUNCTIONS ########
+    
+    def ask_input():
+        input_pars = dict()
+        input_pars['wdir'] = input("Where?\n")
+        time = []
+        time.append(input("How much time to request for NPT? (HH:MM:SS)\n"))
+        ncores = []
+        ncores.append(input("How many cores for NPT?\n"))
+        nsteps = []
+        nsteps.append(input("How many timesteps for NPT?\n")) 
+        nsteps.append(input("How many timesteps for NVT?\n"))
+        loginterval = []
+        loginterval.append(input("Loginterval for NPT?\n"))
+        nthrow = []
+        nthrow.append(input("How many initial timesteps NOT to include in the trajectory for NPT (ntrhow)?\n"))   
+        nthrow.append(input("How many initial timesteps NOT to include in the trajectory for NVT? (nthrow)\n"))
+        input_pars['ninstances'] = input("How many NPT instances?\n")   
+        dt = []
+        dt.append(input("Duration of a timestep (in fs) for NPT:\n"))     
+        bool_nvt = input("Do you want the NVT MD runs to have the same setting (apart from nthrow, and nsteps, already asked separately) (yes/no)\n")    
+        if bool_nvt == 'yes':
+            time.append(time[0])
+            ncores.append(ncores[0])       
+            loginterval.append(loginterval[0])      
+            dt.append(dt[0])   
+        else:
+            time.append(input("How much time to request for NVT? (HH:MM:SS)\n"))       
+            ncores.append(input("How many cores for NVT?\n"))       
+            loginterval.append(input("Loginterval for NVT?\n"))
+            dt.append(input("Duration of a timestep (in fs) for NPT:\n"))
+
+        bool_iso = input("Should isotropy be enforced on the system during NPT (yes/no)?\n")
+        if bool_iso == 'yes':
+            input_pars['iso'] = True       
+        else:
+            input_pars['iso'] = False
+
+        bool_refine = input("Should the average NPT cell be refined before being used in the NVT (yes/no)?\n")
+        if bool_refine == 'yes':
+            input_pars['refine'] = True       
+        else:
+            input_pars['refine'] = False
+
+        input_pars['time'] = time
+        input_pars['ncores'] = ncores
+        input_pars['nsteps'] = nsteps
+        input_pars['loginterval'] = loginterval
+        input_pars['nthrow'] = nthrow
+        input_pars['dt'] = dt
+        
+        input_pars['matrix'] = input("Give the multiplication matrix for the supecell. Give all the nine elements 11, 12, 13, 21, 22, 23, 31, 32, 33\n")
+        mode = input("Choose mode\n1 - Homogeneous custom range\n2 - Custom list of temperatures\n")
+
+        if str(mode) == '1':
+            input_pars['mode'] = '1'
+            input_pars['T1'] = input("T start (K); integer:\n")
+            input_pars['T2'] = input("T stop (K); integer (excluded):\n")
+            input_pars['step'] = input("step (K); integer:\n")
+        elif str(mode) == '2':
+            input_pars['mode'] = '2'
+            ntemps = input("How many temperatures?\n")
+            temps = []
+            for i in range(int(ntemps)):
+                temp = input(f"Give the temperature n. {i+1}\n")
+                temps.append(temp)
+            input_pars['temps'] = temps
+        else:
+            print("You are not the smart one in your  family, are you?")
+            
+        input_pars = convert_input_pars(input_pars)
+        
+        return input_pars
+
+    def get_input_from_file(filepath):
+        filepath = Path(filepath)
+        with open(filepath, 'r') as fl:
+            lines = fl.readlines()
+        input_pars = dict()
+        for line in lines:
+            if line.split() == []:
+                continue
+            var_name = line.split()[0]
+            var_content = " ".join([str(x) for x in line.split()[1:]]).split()
+            input_pars[var_name] = var_content  
+        input_pars['iso'] = eval(input_pars['iso'][0])
+        input_pars['refine'] = eval(input_pars['refine'][0])
+        input_pars = convert_input_pars(input_pars)
+        
+        keys = list(input_pars.keys())
+        values = list(input_pars.values())
+        for i in range(len(values)):
+            print(f'{keys[i]} ---> {values[i]}')
+        return input_pars
+
+    def convert_input_pars(input_pars):
+        input_pars['wdir'] = Path(input_pars['wdir'][0])
+        input_pars['time'] = [str(x) for x in input_pars['time']] 
+        input_pars['ncores'] = [int(x) for x in input_pars['ncores']]
+        input_pars['nsteps'] = [int(x) for x in input_pars['nsteps']]
+        input_pars['loginterval'] = [int(x) for x in input_pars['loginterval']]
+        input_pars['nthrow'] = [int(x) for x in input_pars['nthrow']]
+        input_pars['ninstances'] = int(input_pars['ninstances'][0])
+        input_pars['dt'] = [float(x) for x in input_pars['dt']]
+        mat_elems = input_pars['matrix']
+        matrix = [[mat_elems[0], mat_elems[1], mat_elems[2]],
+                  [mat_elems[3], mat_elems[4], mat_elems[5]],
+                  [mat_elems[6], mat_elems[7], mat_elems[8]]]
+        input_pars['matrix'] = np.array(matrix, dtype='float')
+        if 'mode' in input_pars.keys():
+            input_pars['mode'] = int(input_pars['mode'][0])
+            if input_pars['mode'] == 1:
+                input_pars['temps'] = np.array([float(input_pars['T1']), float(input_pars['T2'])])
+            else:
+                input_pars['temps'] = np.array(input_pars['temps'], dtype='float')                
+        else:
+            input_pars['temps'] = np.array(input_pars['temps'], dtype='float')
+        new_temps = []
+        for temp in input_pars['temps']:
+            if temp.is_integer():
+                new_temps.append(int(temp))
+            else:
+                new_temps.append(temp)
+        input_pars['temps'] = new_temps
+                
+
+        return input_pars
+
+    ################
+
+    if mode == 'interactive':
+        input_pars = ask_input()
+    elif mode == 'from_file':
+        input_pars = get_input_from_file(fpath)
+        
+    root_dir = input_pars['wdir']
+    scripts_dir = root_dir.joinpath('scripts_md/')
+    os.system(f'mkdir -p {scripts_dir.absolute()}')
+      
+    scripts_to_copy_dir = Path(__file__).parent.joinpath('data/make_md')
+    file_to_copy_names = ['RunNPT_instance.py', 'RunNVT.py', 'LaunchNPT_instances.py', 'nvt_job.sh', 'npt_job.sh']
+    for f in file_to_copy_names:
+        os.system(f"cp {scripts_to_copy_dir.joinpath(f)} {scripts_dir.absolute()}")
+    
+    RunNPT_path = scripts_dir.joinpath('RunNPT_instance.py')
+    RunNVT_path = scripts_dir.joinpath('RunNVT.py')
+        
+    matrix = input_pars['matrix']
+    
+    for i, filepath in enumerate([RunNPT_path, RunNVT_path]):
+        tokens = np.zeros(10)
+       # filepath = f'{scripts_dir}{file}'
+        newlines = []
+        with open(filepath.absolute(), 'r') as fl:
+            lines = fl.readlines()
+        for line in lines:
+            if 'rootdir = ' in line:
+                newlines.append(f'rootdir = \'{root_dir}\'\n')
+            elif 'nproc' in line and tokens[1] == 0:
+                newlines.append(f"nproc = {input_pars['ncores'][i]}\n")
+                tokens[1] = 1
+            elif 'nsteps' in line and tokens[2] == 0:
+                newlines.append(f"nsteps = {input_pars['nsteps'][i]}\n")
+                tokens[2] = 1
+            elif 'loginterval' in line and tokens[3] == 0:
+                newlines.append(f"loginterval = {input_pars['loginterval'][i]}\n")
+                tokens[3] = 1
+            elif 'nthrow' in line and tokens[4] == 0:
+                newlines.append(f"nthrow = {input_pars['nthrow'][i]}\n")
+                tokens[4] = 1
+            elif 'dt' in line and tokens[5] == 0:
+                newlines.append(f"dt = {input_pars['dt'][i]}\n")
+                tokens[5] = 1
+            elif 'iso' in line and tokens[6] == 0:
+                newlines.append(f"iso = {input_pars['iso']}\n")
+                tokens[6] = 1
+            elif 'mult_mat' in line and tokens[7] == 0:
+                newlines.append(f"mult_mat = np.array([[{matrix[0,0]}, {matrix[0,1]}, {matrix[0,2]}], [{matrix[1,0]}, {matrix[1,1]}, {matrix[1,2]}], [{matrix[2,0]}, {matrix[2,1]}, {matrix[2,2]}]])\n")
+                tokens[7] = 1
+            elif 'refine =' in line and tokens[8] == 0:
+                newlines.append(f"refine = {str(input_pars['refine'])}\n")
+                tokens[8] = 1
+            else:
+                newlines.append(line)
+        with open(filepath.absolute(), 'w') as fl:
+            fl.writelines(newlines)
+    
+    npt_job_path = scripts_dir.joinpath('npt_job.sh')
+    nvt_job_path = scripts_dir.joinpath('nvt_job.sh')
+    
+    for i, filepath in enumerate([npt_job_path, nvt_job_path]):
+        newlines = []
+        with open(filepath.absolute(), 'r') as fl:
+            lines = fl.readlines()
+        for line in lines:
+            if '#SBATCH --ntasks=' in line:
+                newlines.append(f"#SBATCH --ntasks={input_pars['ncores'][i]}\n")
+            elif '#SBATCH --time=' in line:
+                newlines.append(f"#SBATCH --time={input_pars['time']}\n")
+            else:
+                newlines.append(line)
+        with open(filepath.absolute(), 'w') as fl:
+            fl.writelines(newlines)
+
+    LaunchNPT_instances_path = scripts_dir.joinpath('LaunchNPT_instances.py')
+    newlines = []
+    with open(LaunchNPT_instances_path.absolute(), 'r') as fl:
+        lines = fl.readlines()
+    for line in lines:
+        if 'rootdir =' in line:
+            newlines.append(f'rootdir = \'{root_dir}\'\n')
+        elif 'ninstances =' in line:
+            newlines.append(f"ninstances = {input_pars['ninstances']}\n")
+        else:
+            newlines.append(line)
+    with open(LaunchNPT_instances_path.absolute(), 'w') as fl:
+        fl.writelines(newlines)
+
+
+    for T in input_pars['temps']:
+        temp_dir = root_dir.joinpath(f'T{T}K/')
+        os.system(f'mkdir -p {temp_dir.absolute()}')
+        os.system(f"ln -s -f {scripts_dir.absolute().joinpath('*')} {temp_dir.absolute()}")
+
+
+

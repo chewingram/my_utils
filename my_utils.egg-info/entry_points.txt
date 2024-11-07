@@ -1,0 +1,3 @@
+[console_scripts]
+make_md = my_utils.utils_mlip:make_md
+
