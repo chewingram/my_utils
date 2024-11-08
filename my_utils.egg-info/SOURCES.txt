@@ -16,7 +16,3 @@ my_utils.egg-info/SOURCES.txt
 my_utils.egg-info/dependency_links.txt
 my_utils.egg-info/entry_points.txt
 my_utils.egg-info/top_level.txt
-my_utils/data/LaunchNPT_instances.py
-my_utils/data/RunNPT_instance.py
-my_utils/data/RunNVT.py
-my_utils/data/__init__.py

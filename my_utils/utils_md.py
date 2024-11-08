@@ -1,5 +1,7 @@
 import os
 import numpy as np
+import argparse
+from pathlib import Path
 from ase.io import read, write, Trajectory
 from ase.build import make_supercell
 from ase.calculators.lammpsrun import LAMMPS
@@ -166,11 +168,12 @@ def run_md(ismpi = False,
 
         # COLLECT THE RESULTS
         # Now the MD has run, so we can store the resulting configurations inside traj
-        traj = read(f'{workdir}mlmd.traj', index=f'{nthrow}:')
-
+        traj = read(f'{workdir}Trajectory/mlmd.traj', index=f'{nthrow}:')
+        print('ok traj read')
         # if it is NPT and the thermalised unitcell is not already there, then we want to create the thermalised unit cell
         # with the data we collected with the MD run
         if isnpt and not os.path.exists(f'{wdir}T{temperature}K_unitcell.json'):
+            print('entered in the if')
             cell = np.array([at.get_cell().array for at in traj]) # create an array of supercells
             cell = cell.mean(axis=0) # make the average supercell
             cell = invmult @ cell # reduce the average supercell to the average unitcell
@@ -182,6 +185,7 @@ def run_md(ismpi = False,
         # file in which we can store all the configurations we got wit the MD along with their energy computes with the
         # calculator.
         elif not os.path.exists(f'{wdir}T{temperature}K.traj'):
+            print('entered in the elif')
             newtraj = Trajectory(f'{wdir}T{temperature}K.traj', 'w')
             #traj = reconstruct_mlmd_trajectory(f'{workdir}mlmd.traj', f'{workdir}mlmd.log')[nthrow:]
             os.environ["ASE_LAMMPSRUN_COMMAND"] = f"mpirun -n {nproc} {lmp_bin}"
@@ -191,6 +195,8 @@ def run_md(ismpi = False,
                 at.calc = calc
                 at.get_potential_energy()
                 newtraj.write(at)
+        else:
+            print('entered in the else')
 
 
     
@@ -234,9 +240,309 @@ def run_md(ismpi = False,
                      loginterval = loginterval,
                      isnpt=False)
 
-       
+        
+        
+def make_md(mode='interactive', fpath=None):
+    '''Function to set the folders and scripts for the usual MD (NPT + NVT) run
+    
+    Parameters
+    ----------
+    
+    mode: {'interactive', 'from_file'}
+        - interactive: the input will be asked to the user
+        - from_file: the input will be extracted from a file
+    fpath: str
+        path to the file containing the instructions
+        
+    '''
+    parser = argparse.ArgumentParser(description="make_md script!")
+    
+    parser.add_argument("--mode", type=str, default='interactive', help="Mode of using this tool:\n\t- interactive: the input will be asked to the user\n\t- from_file: the input will be extracted from a file")
+    parser.add_argument("--fpath", type=str, default=None, help="path to the file containing the instructions")
+    
+    args = parser.parse_args()
+    
+    mode = args.mode
+    if mode not in ['interactive', 'from_file']:
+        raise ValueError('The parameter "mode" must be either "interactive" or "from_file"')
+    if mode == 'from_file':
+        fpath = Path(args.fpath).absolute()
+        if fpath == None:
+            raise ValueError('When "mode" = "from_file" a file path must be passed as "fpath"')
 
-  
+        
+    ######## FUNCTIONS ########
+    
+    def ask_input():
+        input_pars = dict()
+        input_pars['wdir'] = input("Where?\n")
+        time = []
+        time.append(input("How much time to request for NPT? (HH:MM:SS)\n"))
+        ncores = []
+        ncores.append(input("How many cores for NPT?\n"))
+        nsteps = []
+        nsteps.append(input("How many timesteps for NPT?\n")) 
+        nsteps.append(input("How many timesteps for NVT?\n"))
+        loginterval = []
+        loginterval.append(input("Loginterval for NPT?\n"))
+        nthrow = []
+        nthrow.append(input("How many initial timesteps NOT to include in the trajectory for NPT (ntrhow)?\n"))   
+        nthrow.append(input("How many initial timesteps NOT to include in the trajectory for NVT? (nthrow)\n"))
+        input_pars['ninstances'] = input("How many NPT instances?\n")   
+        dt = []
+        dt.append(input("Duration of a timestep (in fs) for NPT:\n"))     
+        bool_nvt = input("Do you want the NVT MD runs to have the same setting (apart from nthrow, and nsteps, already asked separately) (yes/no)\n")    
+        if bool_nvt == 'yes':
+            time.append(time[0])
+            ncores.append(ncores[0])       
+            loginterval.append(loginterval[0])      
+            dt.append(dt[0])   
+        else:
+            time.append(input("How much time to request for NVT? (HH:MM:SS)\n"))       
+            ncores.append(input("How many cores for NVT?\n"))       
+            loginterval.append(input("Loginterval for NVT?\n"))
+            dt.append(input("Duration of a timestep (in fs) for NPT:\n"))
+
+        bool_iso = input("Should isotropy be enforced on the system during NPT (yes/no)?\n")
+        if bool_iso == 'yes':
+            input_pars['iso'] = True      
+        else:
+            input_pars['iso'] = False
+
+        bool_refine = input("Should the average NPT cell be refined before being used in the NVT (yes/no)?\n")
+        if bool_refine == 'yes':
+            input_pars['refine'] = True       
+        else:
+            input_pars['refine'] = False
+
+        input_pars['time'] = time
+        input_pars['ncores'] = ncores
+        input_pars['nsteps'] = nsteps
+        input_pars['loginterval'] = loginterval
+        input_pars['nthrow'] = nthrow
+        input_pars['dt'] = dt
+        
+        input_pars['matrix'] = input("Give the multiplication matrix for the supecell. Give all the nine elements 11, 12, 13, 21, 22, 23, 31, 32, 33\n")
+        input_pars['matrix'] = [str(x) for x in input_pars['matrix'].split()]
+        input_pars['init_structure'] = [str(x) for x in input('Give the path to the initial structure (must be a POSCAR file)').split()]
+        input_pars['lammps_bin'] = [str(x) for x in input('Give the path to the lammps binary\n').split()]
+        input_pars['mpirun'] = [" ".join([str(x) for x in input('Give any instruction to write before the call to lammps and mpt (e.g. mpirun)\n').split()])]
+        input_pars['pair_style'] = [str(x) for x in input('Give the lammps pair style\n').split()]
+        
+        mode = input("Choose mode\n1 - Homogeneous custom range\n2 - Custom list of temperatures\n")
+
+        if str(mode) == '1':
+            input_pars['mode'] = ['1']
+            input_pars['T1'] = input("T start (K); integer:\n")
+            input_pars['T2'] = input("T stop (K); integer (excluded):\n")
+            input_pars['step'] = input("step (K); integer:\n")
+        elif str(mode) == '2':
+            input_pars['mode'] = ['2']
+            ntemps = input("How many temperatures?\n")
+            temps = []
+            for i in range(int(ntemps)):
+                temp = input(f"Give the temperature n. {i+1}\n")
+                temps.append(temp)
+            input_pars['temps'] = temps
+        else:
+            print("You are not the smart one in your  family, are you?")
+            
+        # let's convert the string into list of tokens
+#         print(list(input_pars.values()))
+#         for i in range(len(list(input_pars.keys()))):
+#             input_pars[list(input_pars.keys())[i]] = list(input_pars.values())[i].split()
+            
+        input_pars = convert_input_pars(input_pars)
+        
+        return input_pars
+
+    def get_input_from_file(filepath):
+        filepath = Path(filepath)
+        with open(filepath, 'r') as fl:
+            lines = fl.readlines()
+        input_pars = dict()
+        for line in lines:
+            if line.split() == []:
+                continue
+            var_name = line.split()[0]
+            var_content = " ".join([str(x) for x in line.split()[1:]]).split()
+            input_pars[var_name] = var_content
+        input_pars['iso'] = eval(input_pars['iso'][0])
+        input_pars['refine'] = eval(input_pars['refine'][0])
+        input_pars['parallel'] = eval(input_pars['parallel'][0])
+        input_pars = convert_input_pars(input_pars)
+        
+        return input_pars
+
+    def convert_input_pars(input_pars):
+        input_pars['wdir'] = Path(input_pars['wdir'][0]).absolute()
+        input_pars['mpirun'] = str(input_pars['mpirun'][0])
+        input_pars['lammps_bin'] = Path(input_pars['lammps_bin'][0])
+        if len(input_pars['pair_style']) == 2:
+            if Path(input_pars['pair_style'][1]).absolute().is_file() == True:
+                pp = Path(input_pars['pair_style'][1]).absolute()
+            else:
+                pp = input_pars['pair_style'][1]
+            input_pars['pair_style'] = " ".join([input_pars['pair_style'][0], str(pp)])
+        else:
+            input_pars['pair_style'] = str(input_pars['pair_style'][0])
+        input_pars['init_structure'] = Path(input_pars['init_structure'][0]).absolute()
+        input_pars['time'] = [str(x) for x in input_pars['time']] 
+        input_pars['ncores'] = [int(x) for x in input_pars['ncores']]
+        input_pars['nsteps'] = [int(x) for x in input_pars['nsteps']]
+        input_pars['loginterval'] = [int(x) for x in input_pars['loginterval']]
+        input_pars['nthrow'] = [int(x) for x in input_pars['nthrow']]
+        input_pars['ninstances'] = int(input_pars['ninstances'][0])
+        input_pars['dt'] = [float(x) for x in input_pars['dt']]
+        mat_elems = input_pars['matrix']
+        matrix = [[mat_elems[0], mat_elems[1], mat_elems[2]],
+                  [mat_elems[3], mat_elems[4], mat_elems[5]],
+                  [mat_elems[6], mat_elems[7], mat_elems[8]]]
+        input_pars['matrix'] = np.array(matrix, dtype='float')
+        if 'mode' in input_pars.keys():
+            input_pars['mode'] = int(input_pars['mode'][0])
+            if input_pars['mode'] == 1:
+                input_pars['temps'] = np.array([float(input_pars['T1']), float(input_pars['T2'])])
+            else:
+                input_pars['temps'] = np.array(input_pars['temps'], dtype='float')                
+        else:
+            input_pars['temps'] = np.array(input_pars['temps'], dtype='float')
+        new_temps = []
+        for temp in input_pars['temps']:
+            if temp.is_integer():
+                new_temps.append(int(temp))
+            else:
+                new_temps.append(temp)
+        input_pars['temps'] = new_temps
+                
+        keys = list(input_pars.keys())
+        values = list(input_pars.values())
+        for i in range(len(values)):
+            print(f'{keys[i]} ---> {values[i]}')
+            
+        return input_pars
+
+    ################
+    
+    if mode == 'interactive':
+        input_pars = ask_input()
+    elif mode == 'from_file':
+        input_pars = get_input_from_file(fpath)
+        
+    if input_pars['ncores'][0] > 1 or input_pars['ncores'][0] > 1:
+        input_pars['parallel'] = True
+    else:
+        input_pars['parallel'] = False
+    
+    root_dir = input_pars['wdir']
+    scripts_dir = root_dir.joinpath('scripts_md/')
+    
+    os.system(f'mkdir -p {scripts_dir.absolute()}')
+    
+    scripts_to_copy_dir = Path(__file__).parent.joinpath('data/make_md')
+    
+    file_to_copy_names = ['RunNPT_instance.py', 'RunNVT.py', 'LaunchNPT_instances.py', 'nvt_job.sh', 'npt_job.sh']
+    
+    for f in file_to_copy_names:
+        os.system(f"cp {scripts_to_copy_dir.joinpath(f)} {scripts_dir.absolute().joinpath(f)}")
+    
+    if input_pars['init_structure'].is_file() == True:
+        os.system(f"cp {input_pars['init_structure'].absolute()} {root_dir.absolute().joinpath('unitcell.poscar')}")
+    else:
+        raise FileNotFound(f'The initial structure was not found!')
+        
+    RunNPT_path = scripts_dir.joinpath('RunNPT_instance.py')
+    RunNVT_path = scripts_dir.joinpath('RunNVT.py')
+        
+    matrix = input_pars['matrix']
+    
+    for i, filepath in enumerate([RunNPT_path, RunNVT_path]):
+        newlines = []
+        tokens = np.zeros(20)
+        with open(filepath.absolute(), 'r') as fl:
+            lines = fl.readlines()
+        for j, line in enumerate(lines):
+            if 'root_dir =' in line and tokens[0] == 0:
+                newlines.append(f'root_dir = \'{root_dir.absolute()}\'\n')
+                tokens[0] = 1
+            elif 'nproc' in line and tokens[1] == 0:
+                newlines.append(f"nproc = {input_pars['ncores'][i]}\n")
+                tokens[1] += 1
+            elif 'nsteps' in line and tokens[2] == 0:
+                newlines.append(f"nsteps = {input_pars['nsteps'][i]}\n")
+                tokens[2] += 1
+            elif 'loginterval' in line and tokens[3] == 0:
+                newlines.append(f"loginterval = {input_pars['loginterval'][i]}\n")
+                tokens[3] += 1
+            elif 'nthrow' in line and tokens[4] == 0:
+                newlines.append(f"nthrow = {input_pars['nthrow'][i]}\n")
+                tokens[4] += 1
+            elif 'dt' in line and tokens[5] == 0:
+                newlines.append(f"dt = {input_pars['dt'][i]}\n")
+                tokens[5] += 1
+            elif 'iso' in line and tokens[6] == 0:
+                newlines.append(f"iso = {input_pars['iso']}\n")
+                tokens[6] += 1
+            elif 'mult_mat' in line and tokens[7] == 0:
+                newlines.append(f"mult_mat = np.array([[{matrix[0,0]}, {matrix[0,1]}, {matrix[0,2]}], [{matrix[1,0]}, {matrix[1,1]}, {matrix[1,2]}], [{matrix[2,0]}, {matrix[2,1]}, {matrix[2,2]}]])\n")
+                tokens[7] += 1
+            elif 'refine' in line and tokens[8] == 0:
+                newlines.append(f"refine = {str(input_pars['refine'])}\n")
+                tokens[8] += 1
+            elif 'mpirun' in line and tokens[9] == 0:
+                newlines.append(f"mpirun = \'{input_pars['mpirun']}\'\n")
+                tokens[9] += 1
+            elif 'pair_style' in line and tokens[10] == 0:
+                newlines.append(f"pair_style = \'{input_pars['pair_style']}\'\n")
+                tokens[10] += 1
+            elif 'lmp_bin' in line and tokens[11] == 0:
+                newlines.append(f"lmp_bin = \'{input_pars['lammps_bin']}\'\n")
+                tokens[11] += 1
+            elif 'ismpi' in line and tokens[12] == 0:
+                newlines.append(f"ismpi = {input_pars['parallel']}\n")
+                tokens[12] += 1
+            else:
+                newlines.append(line)
+        with open(filepath.absolute(), 'w') as fl:
+            fl.writelines(newlines)
+    
+    npt_job_path = scripts_dir.joinpath('npt_job.sh')
+    nvt_job_path = scripts_dir.joinpath('nvt_job.sh')
+    
+    for i, filepath in enumerate([npt_job_path, nvt_job_path]):
+        newlines = []
+        with open(filepath.absolute(), 'r') as fl:
+            lines = fl.readlines()
+        for line in lines:
+            if '#SBATCH --ntasks=' in line:
+                newlines.append(f"#SBATCH --ntasks={input_pars['ncores'][i]}\n")
+            elif '#SBATCH --time=' in line:
+                newlines.append(f"#SBATCH --time={input_pars['time'][i]}\n")
+            else:
+                newlines.append(line)
+        with open(filepath.absolute(), 'w') as fl:
+            fl.writelines(newlines)
+
+    LaunchNPT_instances_path = scripts_dir.joinpath('LaunchNPT_instances.py')
+    newlines = []
+    with open(LaunchNPT_instances_path.absolute(), 'r') as fl:
+        lines = fl.readlines()
+    for line in lines:
+        if 'root_dir =' in line:
+            newlines.append(f"root_dir = \'{root_dir.absolute()}\'\n")
+        elif 'ninstances =' in line:
+            newlines.append(f"ninstances = {input_pars['ninstances']}\n")
+        else:
+            newlines.append(line)
+    with open(LaunchNPT_instances_path.absolute(), 'w') as fl:
+        fl.writelines(newlines)
+
+
+    for T in input_pars['temps']:
+        temp_dir = root_dir.joinpath(f'T{T}K/')
+        os.system(f'mkdir -p {temp_dir.absolute()}')
+        os.system(f"ln -s -f {scripts_dir.absolute().joinpath('*')} {temp_dir.absolute()}")
+        os.system(f"ln -s -f {root_dir.absolute().joinpath('unitcell.poscar')} {temp_dir.absolute()}")
     
             
 

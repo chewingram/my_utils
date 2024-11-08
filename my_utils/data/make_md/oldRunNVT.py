@@ -5,8 +5,8 @@
 import numpy as np
 import sys
 sys.path.append('/scratch/ulg/matnan/slongo/my_scripts/')
-from my_utils.utils_md import run_md
-from my_utils.utils import path
+from utils_md import run_md
+from utils import path
 import os
 from ase.io import read, write
 from ase.build import make_supercell
@@ -22,34 +22,34 @@ mpirun =
 refine =
 
 # PARAMETERS TO CHANGE FOR THE MD
-dt = 
-nsteps = 
-loginterval =
-nthrow =
-nproc = 
+dt =
+nsteps =
+loginterval = 
+nthrow = 
+nproc =
 lmp_bin = 
-pair_style =
-temperature = int(os.getcwd().split('/')[-1][1:-1])
+pair_style = 
+temperature = int(os.getcwd().split('/')[-3][1:-1])
 root_dir = 
-root_dir = Path(root_dir)
-temp_dir = root_dir.joinpath(f'T{temperature}K')
+temp_dir = path(f'{rootdir}T{temperature}K')
 mult_mat = 
-ismpi = 
+ismpi =
 
 # As a first thing, we need a copy of the unit cell
-ucell_path = root_dir.joinpath(f'unitcell.poscar')
+ucell_path = f'{rootdir}unit_cell.poscar'
 ucell = read(ucell_path)
 
 # We prepare the inverted matrix for the contraction
 invmult = np.linalg.inv(mult_mat)
 
 # We look for the npt instances
-npt_dir = temp_dir.joinpath(f'NPT/')
+npt_dir = f'{temp_dir}/NPT/'
 npt_inst_dirs = Path(npt_dir).glob('*_instance')
+
 # Now we load the NPT cells (to average)
 npt_cells = []
 for npt_inst_dir in npt_inst_dirs:
-    traj_path = npt_inst_dir.joinpath('NPT/Trajectory/mlmd.traj')
+    traj_path = f'{path(npt_inst_dir)}NPT/mlmd.traj'
     traj = read(traj_path, index=':')
     npt_cells.extend([x.get_cell() for x in traj])
 npt_cells = np.array(npt_cells)
@@ -71,7 +71,7 @@ if refine == True:
     new_cell = adapter.get_atoms(analyzer.get_refined_structure())
 
 # We also save it
-avg_cell_path = temp_dir.joinpath(f'T{temperature}K_unitcell.json')
+avg_cell_path = f'{temp_dir}T{temperature}K_unitcell.json'
 write(avg_cell_path, new_cell)
 
 
@@ -86,13 +86,13 @@ run_args = dict(ismpi = ismpi,
                 loginterval = loginterval,        
                 nthrow = nthrow,
                 nproc = nproc,
-                ucell_path = root_dir.joinpath('unitcell.poscar'),
+                ucell_path = f'{rootdir}unit_cell.poscar',
                 mult_mat = mult_mat,
                 pair_style = pair_style,
                 pair_coeff = ['* *'],
                 lmp_bin = lmp_bin, 
                 ase_lammps_command=None,
-                wdir = Path('./'),
+                wdir = root_dir,
                 make_wdir = True,
                 NPT = False,
                 NVT = True,

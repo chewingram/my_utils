@@ -4,44 +4,48 @@
 import numpy as np
 import sys
 sys.path.append('/scratch/ulg/matnan/slongo/my_scripts/')
-from utils_md import run_md
-from utils import path
+from my_utils.utils_md import run_md
+from my_utils.utils import path
 import os
 from ase.io import read, write
+from pathlib import Path
 
+# MPIRUN
+mpirun =
 
 # PARAMETERS TO CHANGE FOR THE MD
-dt = 
-nsteps = 
+dt =
+nsteps =
 loginterval =
 nthrow =
-nproc = 
-iso = 
+nproc =
+lmp_bin = 
+pair_style = 
 temperature = int(os.getcwd().split('/')[-3][1:-1])
-
-rootdir = 
-temp_dir = path(f'{rootdir}T{temperature}K')
-
+root_dir =
+root_dir = Path(root_dir)
+iso = 
+temp_dir = root_dir.joinpath(f'T{temperature}K')
 mult_mat =
+ismpi =
 
 
 
-
-run_args = dict(ismpi = True,
-                mpirun = 'mpirun',
+run_args = dict(ismpi = ismpi,
+                mpirun = mpirun,
                 temperature = temperature,
                 dt = dt,
                 nsteps = nsteps,
                 loginterval = loginterval,        
                 nthrow = nthrow,
                 nproc = nproc,
-                ucell_path = f'{rootdir}unit_cell.poscar',
+                ucell_path = root_dir.joinpath('unitcell.poscar'),
                 mult_mat = mult_mat,
-                pair_style = ,# something like 'mlip path_to_the_file/mlip.ini'
+                pair_style = pair_style, 
                 pair_coeff = ['* *'],
-                lmp_bin = '/scratch/ulg/matnan/slongo/codes/lammps_mtp/src/lmp_mpi',
+                lmp_bin = lmp_bin,
                 ase_lammps_command=None,
-                wdir = path(f'./'),
+                wdir = Path('./'),
                 make_wdir = True,
                 NPT = True,
                 NVT = False,

@@ -11,7 +11,7 @@ setup(
     include_package_data=True,  # Ensure this is present
     entry_points={
         "console_scripts": [
-            "make_md = my_utils.utils_mlip:make_md",
+            "make_md = my_utils.utils_md:make_md",
         ],
     },
     classifiers=[
