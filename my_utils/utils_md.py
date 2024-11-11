@@ -188,7 +188,7 @@ def run_md(ismpi = False,
             print('entered in the elif')
             newtraj = Trajectory(f'{wdir}T{temperature}K.traj', 'w')
             #traj = reconstruct_mlmd_trajectory(f'{workdir}mlmd.traj', f'{workdir}mlmd.log')[nthrow:]
-            os.environ["ASE_LAMMPSRUN_COMMAND"] = f"mpirun -n {nproc} {lmp_bin}"
+            os.environ["ASE_LAMMPSRUN_COMMAND"] = f"{mpirun} -n {nproc} {lmp_bin}"
             calc = LAMMPS(pair_style=pair_style, pair_coeff=pair_coeff,
                       tmp_dir="WTFASE")
             for at in traj:
