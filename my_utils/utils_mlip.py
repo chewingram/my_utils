@@ -5,6 +5,7 @@ import numpy as np
 from pathlib import Path
 import os
 import argparse
+from copy import deepcopy
 
 import sys
 
@@ -146,7 +147,7 @@ def conv_ase_to_mlip2(atoms, out_path, props=True):
         text += f'END_CFG\n\n'
     with open(out_path, 'w') as fl:
         fl.write(text)
-    print(f'File printed to {out_path}')
+    #print(f'File printed to {out_path}')
 
 
 
@@ -301,7 +302,7 @@ def extract_prop_from_ase(structures):
     forces = np.array([x.get_forces() for x in structures], dtype='float')
     stress = np.array([x.get_stress() for x in structures], dtype='float')
     
-    return energies, forces, stress
+    return energy, forces, stress
     
 
 
@@ -482,16 +483,20 @@ def make_comparison(is_ase1=True,
         ext1 = [x.flatten() for x in extract_prop_from_ase(structures1)]
     else:
         ext1 = [x.flatten() for x in extract_prop_from_cfg(file1)]
-         
+    nstructs = len(ext1[0])
+    natoms = int(len(ext1[1])/3/nstructs)
+
+    ext1[0] = ext1[0] #* natoms
+
     if is_ase2 == True:
         ext2 = [x.flatten() for x in extract_prop_from_ase(structures2)]
     else:
         ext2 = [x.flatten() for x in extract_prop_form_cfg(file2)]
+    ext2[0] = ext2[0] #* natoms
 
     assert len(ext1) == len(ext2), f"You gave a different number of "\
         + f"true and ML structures!"
         
-    
     # Compute errors and write data on files
     errs = dict()
     for prop in props:
@@ -845,7 +850,7 @@ def train_pot_from_ase_tmp(mlip_bin,
                       out_path=cfg_path,
                       props=True)
     species_count = len(list(set(np.array([x.get_chemical_symbols() for  x in train_set]).flatten())))
-    print('inside train_pot_from_ase_tmp calling for train_pot_tmp')
+    #print('inside train_pot_from_ase_tmp calling for train_pot_tmp')
     train_pot_tmp(mlip_bin=mlip_bin,
                   untrained_pot_file_dir=untrained_pot_file_dir,
                   mtp_level=mtp_level,
@@ -897,7 +902,7 @@ def calc_efs(mlip_bin, mpirun='', confs_path='in.cfg', pot_path='pot.mtp', out_p
     log_path = f'{dir}log_calc_efs'
     err_path = f'{dir}err_calc_efs'
     with open(log_path, 'w') as log, open(err_path, 'w') as err:
-        print(cmd)
+        #print(cmd)
         run(cmd.split(), cwd=dir, stdout=log, stderr=err)
         
 
@@ -940,17 +945,17 @@ def calc_efs_from_ase(mlip_bin, atoms, mpirun='', pot_path='pot.mtp', cfg_files=
     dir = path(dir)
     # first we need to convert ASE to cfg
     cfg_traj = f'{dir}in.cfg'
+    atoms = deepcopy(atoms)
     conv_ase_to_mlip2(atoms, cfg_traj, props=False)
     
     # compute the properties
     calc_efs(mlip_bin, mpirun=mpirun, confs_path=cfg_traj, pot_path=pot_path, out_path=f'{dir}{out_path}', dir=dir)
     
     # extract the properties from the results
-    energy, forces, stress = extract_prop(filepath=f'{dir}{out_path}')
-
+    energy, forces, stress = extract_prop(filepath=f'{dir}{out_path}') # energy per atom!!
     # for each configuration create the SinglePoint calculator and assign it, then "compute" the properties
     for i, atom in enumerate(atoms):
-        calc = SinglePointCalculator(atom, energy=energy[i], forces=forces[i], stress=stress[i])
+        calc = SinglePointCalculator(atom, energy=energy[i]*len(atom), forces=forces[i], stress=stress[i])
         atom.calc = calc
         atom.get_potential_energy()
     
