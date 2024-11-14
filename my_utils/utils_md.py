@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import argparse
+from copy import deepcopy as cp
 from pathlib import Path
 from ase.io import read, write, Trajectory
 from ase.build import make_supercell
@@ -93,12 +94,23 @@ def run_md(ismpi = False,
                                   Setting nvt_scell != None can be useful if one needs to run two independent NPT and NVT in
                                   the same working directory.
                                   
-    log_file(str): name of the log file; it will be saved in the lammps workdir (NPT or NVT)
+    logfile(str): name of the log file; it will be saved in the lammps workdir (NPT or NVT)
     
-    traj_file(str): name of the trajectory file; it will be saved in the lammps workdir (NPT or NVT).
+    trajfile(str): name of the trajectory file; it will be saved in the lammps workdir (NPT or NVT).
     
     iso(bool): mandatory when npt=True, useless otherwise. If True, then the NPT MD is done enforcing isotropy; if False, then anisotropy.
     '''
+    
+    if ucell_path is not None:
+        ucell_path = Path(ucell_path)
+    if lmp_bin is not None:
+        lmp_bin = Path(lmp_bin)
+    if wdir is not None:
+        wdir = Path(wdir)
+    if logfile is not None:
+        logfile = Path(logfile)
+    if trajfile is not None:
+        trajfile = Path(trajfile)
     
     if mult_mat is None:
         mult_mat = np.diag([1, 1, 1])
@@ -117,13 +129,12 @@ def run_md(ismpi = False,
         raise TypeError('Please specify a pair_coeff for lammps!')
     elif lmp_bin is None:
         if ismpi == True:
-            lmp_bin = f'lmp_mpi'
+            lmp_bin = Path('lmp_mpi')
         else:
-            lmp_bin = f'lmp'
+            lmp_bin = Path('lmp')
     elif ase_lammps_command is None:
-        ase_lammpsrun_command = f'{mpirun} -n {nproc} {lmp_bin}'
-            
-    wdir = path(wdir)
+        ase_lammpsrun_command = f'{mpirun} -n {nproc} {lmp_bin.absolute()}'
+
     
         ############################################################################### 
         
@@ -133,7 +144,7 @@ def run_md(ismpi = False,
         '''
         if isnpt:
             press = 0
-            workdir = f'{wdir}NPT/'
+            workdir = wdir.joinpath('NPT')
             if iso == None:
                 iso = 'iso'
             elif iso == True:
@@ -144,59 +155,58 @@ def run_md(ismpi = False,
                 raise ValueError('Since isnpt = True, iso must be either True, False or None (= True by default); any other value is unacceptable.')
         else:
             press = None
-            workdir = f'{wdir}NVT/'
+            workdir = wdir.joinpath('NVT')
 
         state = LammpsState(temperature,
                             press,
                             dt = dt,
                             nsteps = nsteps,
                             loginterval = loginterval,
-                            logfile = 'mlmd.log',
-                            trajfile = 'mlmd.traj',
+                            logfile = Path('mlmd.log').absolute(),
+                            trajfile = Path('mlmd.traj').absolute(),
                             ptype=iso,
-                            workdir = workdir)
+                            workdir = workdir.absolute())
         state.initialize_momenta(atoms) 
 
         # RUN THE MD
         #os.environ['ASE_LAMMPSRUN_COMMAND'] = ase_lammpsrun_command
 
-        if isnpt and not os.path.exists(f'{wdir}T{temperature}K_unitcell.json'):
+        if isnpt and not wdir.joinpath(f'T{temperature}K_unitcell.json').exists():
             state.run_dynamics(atoms, pair_style, pair_coeff)
-        if not isnpt and not os.path.exists(f'{wdir}T{temperature}K.traj'):
+        if not isnpt and not wdir.joinpath(f'T{temperature}K.traj').exists():
             state.run_dynamics(atoms, pair_style, pair_coeff)
 
 
         # COLLECT THE RESULTS
         # Now the MD has run, so we can store the resulting configurations inside traj
-        traj = read(f'{workdir}Trajectory/mlmd.traj', index=f'{nthrow}:')
-        print('ok traj read')
+        traj = read(workdir.joinpath('Trajectory/mlmd.traj').absolute(), index=f'{nthrow}:')
+        
         # if it is NPT and the thermalised unitcell is not already there, then we want to create the thermalised unit cell
         # with the data we collected with the MD run
-        if isnpt and not os.path.exists(f'{wdir}T{temperature}K_unitcell.json'):
-            print('entered in the if')
+        if isnpt and not wdir.joinpath(f'T{temperature}K_unitcell.json').exists():
             cell = np.array([at.get_cell().array for at in traj]) # create an array of supercells
             cell = cell.mean(axis=0) # make the average supercell
             cell = invmult @ cell # reduce the average supercell to the average unitcell
             new_ucell = ucell.copy()
             new_ucell.set_cell(cell, True)
-            write(f'{wdir}T{temperature}K_unitcell.json', new_ucell) # write the cell into a file
+            write(wdir.joinpath(f'T{temperature}K_unitcell.json').absolute(), new_ucell) # write the cell into a file
 
         # if it is NVT and the thermalised supercell is not there, then let us create a calculator and a new trajectory
         # file in which we can store all the configurations we got wit the MD along with their energy computes with the
         # calculator.
-        elif not os.path.exists(f'{wdir}T{temperature}K.traj'):
-            print('entered in the elif')
-            newtraj = Trajectory(f'{wdir}T{temperature}K.traj', 'w')
+        elif not wdir.joinpath(f'T{temperature}K.traj').exists():
+            newtraj = Trajectory(wdir.joinpath(f'T{temperature}K.traj').absolute(), 'w')
             #traj = reconstruct_mlmd_trajectory(f'{workdir}mlmd.traj', f'{workdir}mlmd.log')[nthrow:]
-            os.environ["ASE_LAMMPSRUN_COMMAND"] = f"{mpirun} -n {nproc} {lmp_bin}"
-            calc = LAMMPS(pair_style=pair_style, pair_coeff=pair_coeff,
-                      tmp_dir="WTFASE")
+            os.environ["ASE_LAMMPSRUN_COMMAND"] = f"{mpirun} -n {nproc} {lmp_bin.absolute()}"
+            calc = LAMMPS(pair_style=pair_style, 
+                          pair_coeff=pair_coeff,
+                          tmp_dir=Path('WTFASE').absolute())
             for at in traj:
                 at.calc = calc
                 at.get_potential_energy()
                 newtraj.write(at)
         else:
-            print('entered in the else')
+            pass
 
 
     
@@ -205,15 +215,15 @@ def run_md(ismpi = False,
     
     
     
-    ucell = read(ucell_path)
+    ucell = read(ucell_path.absolute())
     invmult = np.linalg.inv(mult_mat) # this is used after NVT to reduce the thermalised supercell and obtain the thermalised UNIT cell
 
     os.environ['ASE_LAMMPSRUN_COMMAND'] = ase_lammpsrun_command
     if make_wdir == True:
-        os.system(f'mkdir -p {wdir}')
+        wdir.mkdir(parents=True, exist_ok=True)
     else:
-        if not os.exists(wdir):
-            print(f'The working directory {wdir} does not exist! Either create it or set make_wdir = True')
+        if not wdir.exists():
+            print(f'The working directory {wdir.absolute()} does not exist! Either create it or set make_wdir = True')
             exit()
             
     if NPT == True:
@@ -229,7 +239,7 @@ def run_md(ismpi = False,
     if NVT == True:
         if nvt_scell == None:
             # read the thermalised unitcell
-            nvt_scell = read(f'{wdir}T{temperature}K_unitcell.json')
+            nvt_scell = read(wdir.joinpath(f'T{temperature}K_unitcell.json').absolute())
             # run the NVT with the thermalised unitcell
             nvt_scell = make_supercell(nvt_scell, mult_mat)
         
@@ -255,6 +265,7 @@ def make_md(mode='interactive', fpath=None):
         path to the file containing the instructions
         
     '''
+
     parser = argparse.ArgumentParser(description="make_md script!")
     
     parser.add_argument("--mode", type=str, default='interactive', help="Mode of using this tool:\n\t- interactive: the input will be asked to the user\n\t- from_file: the input will be extracted from a file")
@@ -266,9 +277,11 @@ def make_md(mode='interactive', fpath=None):
     if mode not in ['interactive', 'from_file']:
         raise ValueError('The parameter "mode" must be either "interactive" or "from_file"')
     if mode == 'from_file':
-        fpath = Path(args.fpath).absolute()
+        fpath = args.fpath
         if fpath == None:
             raise ValueError('When "mode" = "from_file" a file path must be passed as "fpath"')
+        else:
+            fpath = Path(fpath)
 
         
     ######## FUNCTIONS ########
@@ -375,7 +388,7 @@ def make_md(mode='interactive', fpath=None):
         return input_pars
 
     def convert_input_pars(input_pars):
-        input_pars['wdir'] = Path(input_pars['wdir'][0]).absolute()
+        input_pars['wdir'] = Path(input_pars['wdir'][0])
         input_pars['mpirun'] = str(input_pars['mpirun'][0])
         input_pars['lammps_bin'] = Path(input_pars['lammps_bin'][0])
         if len(input_pars['pair_style']) == 2:
@@ -386,7 +399,7 @@ def make_md(mode='interactive', fpath=None):
             input_pars['pair_style'] = " ".join([input_pars['pair_style'][0], str(pp)])
         else:
             input_pars['pair_style'] = str(input_pars['pair_style'][0])
-        input_pars['init_structure'] = Path(input_pars['init_structure'][0]).absolute()
+        input_pars['init_structure'] = Path(input_pars['init_structure'][0])
         input_pars['time'] = [str(x) for x in input_pars['time']] 
         input_pars['ncores'] = [int(x) for x in input_pars['ncores']]
         input_pars['nsteps'] = [int(x) for x in input_pars['nsteps']]
@@ -427,7 +440,7 @@ def make_md(mode='interactive', fpath=None):
     if mode == 'interactive':
         input_pars = ask_input()
     elif mode == 'from_file':
-        input_pars = get_input_from_file(fpath)
+        input_pars = get_input_from_file(fpath.absolute())
         
     if input_pars['ncores'][0] > 1 or input_pars['ncores'][0] > 1:
         input_pars['parallel'] = True
@@ -435,19 +448,18 @@ def make_md(mode='interactive', fpath=None):
         input_pars['parallel'] = False
     
     root_dir = input_pars['wdir']
-    scripts_dir = root_dir.joinpath('scripts_md/')
-    
-    os.system(f'mkdir -p {scripts_dir.absolute()}')
+    scripts_dir = root_dir.joinpath('scripts_md')
+    scripts_dir.mkdir(parents=True, exist_ok=True)
     
     scripts_to_copy_dir = Path(__file__).parent.joinpath('data/make_md')
     
     file_to_copy_names = ['RunNPT_instance.py', 'RunNVT.py', 'LaunchNPT_instances.py', 'nvt_job.sh', 'npt_job.sh']
     
     for f in file_to_copy_names:
-        os.system(f"cp {scripts_to_copy_dir.joinpath(f)} {scripts_dir.absolute().joinpath(f)}")
+        os.system(f"cp {scripts_to_copy_dir.joinpath(f).absolute()} {scripts_dir.joinpath(f).absolute()}")
     
     if input_pars['init_structure'].is_file() == True:
-        os.system(f"cp {input_pars['init_structure'].absolute()} {root_dir.absolute().joinpath('unitcell.poscar')}")
+        os.system(f"cp {input_pars['init_structure'].absolute()} {root_dir.joinpath('unitcell.poscar').absolute()}")
     else:
         raise FileNotFound(f'The initial structure was not found!')
         
@@ -496,7 +508,7 @@ def make_md(mode='interactive', fpath=None):
                 newlines.append(f"pair_style = \'{input_pars['pair_style']}\'\n")
                 tokens[10] += 1
             elif 'lmp_bin' in line and tokens[11] == 0:
-                newlines.append(f"lmp_bin = \'{input_pars['lammps_bin']}\'\n")
+                newlines.append(f"lmp_bin = \'{input_pars['lammps_bin'].absolute()}\'\n")
                 tokens[11] += 1
             elif 'ismpi' in line and tokens[12] == 0:
                 newlines.append(f"ismpi = {input_pars['parallel']}\n")
@@ -540,7 +552,7 @@ def make_md(mode='interactive', fpath=None):
 
     for T in input_pars['temps']:
         temp_dir = root_dir.joinpath(f'T{T}K/')
-        os.system(f'mkdir -p {temp_dir.absolute()}')
+        temp_dir.mkdir(parents=True, exist_ok=True)
         os.system(f"ln -s -f {scripts_dir.absolute().joinpath('*')} {temp_dir.absolute()}")
         os.system(f"ln -s -f {root_dir.absolute().joinpath('unitcell.poscar')} {temp_dir.absolute()}")
     

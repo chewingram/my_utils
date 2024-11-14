@@ -1,32 +1,43 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from pathlib import Path
 import pickle as pkl
+from copy import deepcopy as cp
 from ase.atoms import Atoms
 from ase.io import read, write
 from ase.build import make_supercell
 import os
 import sys
-import .utils_tdep as tdp
+from . import utils_tdep as tdp
+from . import utils_mlip as mlp
 from subprocess import run
-import .utils_mlip as mlp
+import shutil
 from ase.calculators.singlepoint import SinglePointCalculator
 
 
+
+p = Path(shutil.which('extract_forceconstants')).parent
+if p != None:
+    tdp_bin_dir = p
+else:
+    tdp_bin_dir = Path('./')
+print(f'tdp bin path: {tdp_bin_dir.absolute()}')
+    
 class logger():
     def __init__(self, filepath):
-        self.filepath = filepath
+        self.filepath = Path(filepath)
         if os.path.exists(filepath):
-            os.system(f'rm {filepath}')
+            filepath.unlink(missing_ok=True)
     
     def log(self, text):
-        text = f'{text}\n'
+        text = f'{text}'
         print(text)
-        with open(self.filepath, 'a') as fl:
+        with open(self.filepath.absolute(), 'a') as fl:
             fl.write(text)
             
     
     
-def compute_props_MTP(dir, atoms=None, mlp_bin=None, mlp_pot=None):
+def compute_props_MTP(dir, atoms=None, mlp_bin=None, mlp_pot=None, mpirun='mpirun'):
     '''
     Function to compute properties with MTP. It also save the struct + props as an ase traj called new_confs.traj
     Args:
@@ -34,32 +45,29 @@ def compute_props_MTP(dir, atoms=None, mlp_bin=None, mlp_pot=None):
     atoms(ase trajectory): list of ase.Atoms objects to compute properties of
     mlp_bin(str): path to the binary of MTP
     mlp_pot(str): path to the trained potential (.mtp) file to use
+    mpirun(str): command to write before the binary (e.g. 'srun'), default='mpirun'
     '''
-    # first we have to set the input files for MTP
+    
+    dir = Path(dir)
+    if mlp_bin is not None:
+        mlp_bin = Path(mlp_bin)
+    if mlp_pot is not None:
+        mlp_pot = Path(mlp_pot)
+    
+    atoms_with_props = mlp.calc_efs_from_ase(mlip_bin=mlp_bin.absolute(),
+                                             atoms=cp(atoms), 
+                                             mpirun=mpirun,
+                                             pot_path=mlp_pot.absolute(), 
+                                             cfg_files=False, 
+                                             out_path='./out.cfg',
+                                             dir=dir.absolute(), 
+                                             write_conf=False,
+                                             outconf_name=None)
+    
+    write(dir.joinpath('new_confs.traj').absolute(), atoms_with_props)
 
-    # 1. We need to convert the ase confs to a .cfg file
-    #print(f'Just starting the MTP. {len(atoms)} confs have been provided.')
-    file_path = f'{dir}in.cfg'
-    mlp.conv_ase_to_mlip2(atoms=atoms, out_path=file_path, props=False)
-    file_path2 = f'{dir}out.cfg'
-    mlpbin = '/scratch/users/s/l/slongo/codes/mlip-2/build1/mlp'
-    mlp.calc_efs(mlip_bin=mlp_bin, confs_path=file_path, pot_path=mlp_pot, out_path=file_path2, dir=dir)
-    # now we have to store the struct + props as an ase trajectory
-    # first, we know that "atoms" contains the ase traj without properties, so we only need to add the props.
-    # Hence, we extract the properties from the out.cfg
 
-    energy, forces, stress = mlp.extract_prop(file_path2)
-    #print(f'Properties have been extracted. I got {len(energy)} energies.')
-    if not len(energy) == len(atoms):
-        print(f'Hey! not same lenght!: len energy is {len(energy)} and len atoms is {len(atoms)}')
-        exit()
-    for i, conf in enumerate(atoms):
-        natoms = len(conf)
-        calc = SinglePointCalculator(conf, energy=energy[i]*natoms, forces=forces[i], stress=stress[i])
-        conf.calc = calc
-    write(f'{dir}new_confs.traj', atoms)
 
-        
 def compute_true_props(dir, atoms, confs_path, function_to_compute, params_to_compute):
     '''
     Function to compute energy, forces and stress for some configurations. Produces two files:
@@ -76,17 +84,19 @@ def compute_true_props(dir, atoms, confs_path, function_to_compute, params_to_co
     params_to_compute(dict): dictionary with parameters needed by the calculating function (apart from "dir"
                              and "atoms": if ever needed, the are already given as args of this function).
     '''
-
+    dir = Path(dir)
+    confs_path = Path(confs_path)
+    
     # compute props and save the new structs
-    function_to_compute(dir, atoms, **params_to_compute)
+    function_to_compute(dir.absolute(), atoms, **params_to_compute)
     # now new_confs.traj contains new_struct + props, we can merge with the existing ones
-    new_ats = read(f'{dir}new_confs.traj', index=':')
+    new_ats = read(dir.joinpath('new_confs.traj'), index=':')
     ats_to_save = []
-    if os.path.exists(confs_path):
-        existing_confs = read(confs_path, index=':')
+    if os.path.exists(confs_path.absolute()):
+        existing_confs = read(confs_path.absolute(), index=':')
         ats_to_save.extend(existing_confs)
     ats_to_save.extend(new_ats)
-    write(confs_path, ats_to_save)
+    write(confs_path.absolute(), ats_to_save)
 
 def msd_from_positions(confs, ref_conf):
     '''
@@ -135,7 +145,7 @@ def msd_from_positions(confs, ref_conf):
 
     return msd_tot
 
-def run_stdep(root_dir=os.path.abspath('./'),
+def run_stdep(root_dir=Path('./').absolute(),
               mpirun='',
               loto=False, 
               preexisting_ifc=True, 
@@ -150,7 +160,8 @@ def run_stdep(root_dir=os.path.abspath('./'),
               nconfs_start=1,
               thr=0.00001,
               mlp_bin_path=None,
-              mlp_pot_path = None):
+              mlp_pot_path = None,
+              tdp_bin_dir = tdp_bin_dir):
     '''
     Function to run the s-dtep algorithm.
     Args:
@@ -176,6 +187,7 @@ def run_stdep(root_dir=os.path.abspath('./'),
                              used to compute the true properties.
     mlp_pot_path(str, path): currently, path to the trained MTP MLIP. The meaning of this variable is specific for the function
                              used to compute the true properties.
+    tdp_bin_dir(str, path): path to the directory where all the tdep binaries are stored
                        
     '''
     
@@ -205,7 +217,17 @@ def run_stdep(root_dir=os.path.abspath('./'),
     
     def check_convergence(root_dir, conv_prop, confs_path, thr):  
         # actual function:
-        return check_convergence_free_energy(root_dir=root_dir, conv_prop=conv_prop, thr=thr)
+        root_dir = Path(root_dir)
+        confs_path = Path(confs_path)
+        ## TEMPORARY:
+        nconfs = len(read(confs_path.absolute(), index=':'))
+        conv_prop.append([nconfs, 0])
+        if nconfs < 100000:
+            return [False, 0]
+        else:
+            return [True, 0]
+        #############
+        #return check_convergence_free_energy(root_dir=root_dir, conv_prop=conv_prop, thr=thr)
     
     
     def check_convergence_free_energy(root_dir, conv_prop, thr):
@@ -215,16 +237,30 @@ def run_stdep(root_dir=os.path.abspath('./'),
         Args:
         root_dir(str, path): root directory where the directory 'ifc' is.
         '''
-        
-        conv_dir = f'{root_dir}conv_free_energy/'
-        os.system(f'mkdir -p {conv_dir}')
+        root_dir = Path(root_dir)
+        conv_dir = root_dir.joinpath('conv_free_energy')
+        conv_dir.mkdir(parents=True, exist_ok=True)
         
         # first we need to copy the infiles
-        os.system(f'ln -s -f {root_dir}ifc/infile.stat {conv_dir}infile.stat')
-        os.system(f'ln -s -f {root_dir}ifc/infile.meta {conv_dir}infile.meta')
-        os.system(f'ln -s -f {root_dir}ifc/infile.positions {conv_dir}infile.positions')
-        os.system(f'ln -s -f {root_dir}ifc/infile.forces {conv_dir}infile.forces')
-        os.system(f'ln -s -f {root_dir}ifc/outfile.forceconstant {conv_dir}infile.forceconstant')
+        os.system(f'ln -s -f {root_dir.joinpath("ifc/infile.stat")} {conv_dir.joinpath("infile.stat").absolute()}')
+
+        os.system(f'ln -s -f {root_dir.joinpath("ifc/infile.meta").absolute()} {conv_dir.joinpath("infile.meta").absolute()}')
+              
+        os.system(f'ln -s -f {root_dir.joinpath("ifc/infile.positions").absolute()} ' + \
+                  f'{conv_dir.joinpath("infile.positions").absolute()}')
+        
+        os.system(f'ln -s -f {root_dir.joinpath("ifc/infile.forces").absolute()} ' + \
+                  f'{conv_dir.joinpath("infile.forces").absolute()}')
+                
+        os.system(f'ln -s -f {root_dir.joinpath("ifc/outfile.forceconstant").absolute()} ' + \
+                  f'{conv_dir.joinpath("infile.forceconstant").absolute()}')
+        
+        os.system(f'ln -s -f {root_dir.joinpath("infile.ucposcar").absolute()} ' + \
+                  f'{conv_dir.joinpath("infile.ucposcar").absolute()}')
+        
+        os.system(f'ln -s -f {root_dir.joinpath("infile.ssposcar").absolute()} ' + \
+                  f'{conv_dir.joinpath("infile.ssposcar").absolute()}')
+                  
         #if os.path.exists(f'{root_dir}ifc/outfile.forceconstant_thirdorder'):
         #    os.system(f'ln -s -f {root_dir}ifc/outfile.forceconstant_thirdorder {conv_dir}infile.forces')
         fe_params = dict(dir=conv_dir,
@@ -237,7 +273,7 @@ def run_stdep(root_dir=os.path.abspath('./'),
         fe = tdp.make_anharmonic_free_energy(**fe_params)
         
         # extract the number of configurations
-        with open(f'{conv_dir}infile.meta', 'r') as fl:
+        with open(conv_dir.joinpath('infile.meta').absolute(), 'r') as fl:
             lines = fl.readlines()
         nconfs = int(lines[1].split()[0])
         
@@ -256,8 +292,8 @@ def run_stdep(root_dir=os.path.abspath('./'),
         
         
 
-    def plot_convergence(prop_conv):
-        point_to_plot = np.array([[x[0], x[1]]for x in prop_conv])
+    def plot_convergence(conv_prop):
+        point_to_plot = np.array([[x[0], x[1]]for x in conv_prop])
         fig = plt.figure()
         plt.plot(point_to_plot[:,0], point_to_plot[:,1], '.')
         plt.xlabel('N. of configurations used')
@@ -268,7 +304,7 @@ def run_stdep(root_dir=os.path.abspath('./'),
 
     def save_ifc(path, save_name, dir):
         # save the outfile.forceconstant given by path into a separate folder (dir)
-        os.system(f'cp {path} {dir}{save_name}')
+        os.system(f'cp {Path(path).absolute()} {Path(dir).joinpath(save_name).absolute()}')
 
     def nconfs_to_gen(n_iter, offset):
         '''
@@ -280,19 +316,20 @@ def run_stdep(root_dir=os.path.abspath('./'),
         #    if n_iter < limit:
         #    return limit
         #nconfs = offset
-        return offset + 2*n_iter
-    
+        #return offset + 2*n_iter
+        return offset + n_iter**(0.18 * n_iter**0.5)
+
     def save_prop():
         save_free_energy()
      
     def save_free_energy():
         explain = 'This file contains two variables:\n1. This one, that you are currently reading;\n2. A list that contains, as elements, a list of two objects. The first object is the number of configurations and the second object is the free energy in eV'
-        with open('free_energies.pkl', 'wb') as fl:
-                pkl.dump([explain, prop_conv], fl)
+        with open(Path('free_energies.pkl').absolute(), 'wb') as fl:
+                pkl.dump([explain, conv_prop], fl)
     
     def save_msd():
         explain = 'This file contains two variables:\n1. This one, that you are currently reading;\n2. A list that contains, as elements, a list of two objects. The first object is the number of configurations and the second object is a list containing, in order, the msd along x, y, z and "absolute".'
-        with open('mean_squared_displacements.pkl', 'wb') as fl:
+        with open(Path('mean_squared_displacements.pkl').absolute(), 'wb') as fl:
                 pkl.dump([explain, msds], fl)
 
     def save_and_exit():
@@ -302,7 +339,12 @@ def run_stdep(root_dir=os.path.abspath('./'),
     
     ##### END FUNCTIONS #####
     
-    
+    root_dir=Path(root_dir)
+    if mlp_bin_path is not None:
+        mlp_bin_path = Path(mlp_bin_path)
+    if mlp_pot_path is not None:
+        mlp_pot_path = Path(mlp_pot_path)
+                
     # TO START WE NEED:
     # - the unit cell
     # - the supercell
@@ -311,8 +353,8 @@ def run_stdep(root_dir=os.path.abspath('./'),
     # - an ifc infile
     
     # initialise the log file
-    log_path = f'{root_dir}stdep_log.out'
-    l = logger(log_path)
+    log_path = root_dir.joinpath('stdep_log.out')
+    l = logger(log_path.absolute())
     
     run_MTP = compute_props_MTP
 
@@ -326,147 +368,164 @@ def run_stdep(root_dir=os.path.abspath('./'),
     else:
         first_order = ''
         
-    if not os.path.exists(f'{root_dir}infile.ucposcar'):
-        l.log(f'File {root_dir}infile.ucposcar does not exist!')
+    if not root_dir.joinpath('infile.ucposcar').exists():
+        l.log(f'File {root_dir.joinpath("infile.ucposcar")} does not exist!')
         exit()
     else:
-        uc_path = f'{root_dir}infile.ucposcar'
+        uc_path = root_dir.joinpath('infile.ucposcar')
 
-    if not os.path.exists(f'{root_dir}infile.ssposcar'):
-        l.log(f'File {root_dir}infile.ssposcar does not exist!')
+    if not root_dir.joinpath('infile.ssposcar').exists():
+        l.log(f'File {root_dir.joinpath("infile.ssposcar")} does not exist!')
         exit()
     else:
-        ss_path = f'{root_dir}infile.ssposcar'
+        ss_path = root_dir.joinpath('infile.ssposcar')
 
 
     if loto == True:
-        if not os.path.exists(f'{root_dir}infile.lotosplitting'):
-            l.log(f'You asked to apply LO-TO splitting, but file {root_dir}infile.lotosplitting does not exist!')
+        if not root_dir.joinpath('infile.lotosplitting').exists():
+            l.log(f'You asked to apply LO-TO splitting, but file {root_dir.joinpath("infile.lotosplitting")} does not exist!')
             exit()
         else:
             loto_path = f'{root_dir}infile.lotosplitting'
     if preexisting_ifc == True:
-        if not os.path.exists(f'{root_dir}infile.forceconstant'):
-            l.log(f'You asked to use pre-existing ifcs, but file {root_dir}infile.forceconstant does not exist!')
+        if not root_dir.joinpath('infile.forceconstant').exists():
+            l.log(f'You asked to use pre-existing ifcs, but file {root_dir.joinpath("infile.forceconstant")} does not exist!')
             exit()
         else:
-            start_ifc_path = f'{root_dir}infile.forceconstant'
+            start_ifc_path = root_dir.joinpath('infile.forceconstant')
     else:
         if max_freq == None:
             l.log(f'You asked not to use any pre-existing ifcs, but you did not provide a maximum frequency!')
             exit()
 
-    confs_dir = f'{root_dir}configurations/'
-    os.system(f'mkdir -p {confs_dir}')
+    confs_dir = root_dir.joinpath('configurations')
+    confs_dir.mkdir(parents=True, exist_ok=True)
 
-    os.system(f'ln -s -f {uc_path} {confs_dir}')
-    os.system(f'ln -s -f {ss_path} {confs_dir}')
+    os.system(f'ln -s -f {uc_path.absolute()} {confs_dir.absolute()}')
+    os.system(f'ln -s -f {ss_path.absolute()} {confs_dir.absolute()}')
 
     if preexisting_ifc == True:
-        os.system(f'ln -s -f {start_ifc_path} {confs_dir}')
-
-
+        os.system(f'ln -s -f {start_ifc_path.absolute()} {confs_dir.absolute()}')
 
 
     # reference structure
-    ref_at = read(ss_path, format='vasp')
+    ref_at = read(ss_path.absolute(), format='vasp')
 
     # GENERATE FIRST CONFIGURATION
     new_confs_name = 'new_confs.traj'
+
     if preexisting_ifc == True:
-        tdp.make_canonical_configurations(nconf=1, temp=T, quantum=quantum, dir=confs_dir, outfile_name=new_confs_name, pref_bin=mpirun)
+        tdp.make_canonical_configurations(nconf=1, temp=T, quantum=quantum, dir=confs_dir.absolute(), outfile_name=new_confs_name, pref_bin='')
     else:
-        tdp.make_canonical_configurations(nconf=1, temp=T, quantum=quantum, max_freq=max_freq, dir=confs_dir, outfile_name=new_confs_name, pref_bin=mpirun)
+        tdp.make_canonical_configurations(nconf=1, temp=T, quantum=quantum, max_freq=max_freq, dir=confs_dir.absolute(), outfile_name=new_confs_name, pref_bin='')
     n_confs_done += 1
-    new_confs_path = f'{confs_dir}{new_confs_name}' 
-
-
+    l.log(f'+-+-+-+-+-+-+-+-+-+-+-+-+-+-')
+    l.log(f'Iteration n. 1 started.')
+    l.log(f'The first configuration has been generated.')
+    new_confs_path = confs_dir.joinpath(new_confs_name)
+    
     # COMPUTE TRUE PROPERTIES
-    ats = read(new_confs_path, index=':')
+    ats = read(new_confs_path.absolute(), index=':')
     l.log(f'Compute true props for {len(ats)} confs')
     confs_name = 'configurations.traj' # name of the file containing the old structures that will be appended with the new ones + props
-    confs_path = f'{confs_dir}{confs_name}'
-    mlip_dir = f'{root_dir}mlip/'
-    os.system(f'mkdir -p {mlip_dir}')
+    confs_path = confs_dir.joinpath(confs_name)
+    mlip_dir = root_dir.joinpath('mlip')
+    mlip_dir.mkdir(parents=True, exist_ok=True)
 
-    params_to_compute = dict(mlp_bin=mlp_bin_path, mlp_pot=mlp_pot_path)
+    params_to_compute = dict(mlp_bin=mlp_bin_path.absolute(), mlp_pot=mlp_pot_path.absolute(), mpirun='mpirun')
 
-    compute_true_props(dir=mlip_dir, atoms=ats, confs_path=confs_path, function_to_compute=run_MTP, params_to_compute=params_to_compute) # this creates an ase.Atoms object with struct + props of old + new confs                              # called {confs_name}
+    compute_true_props(dir=mlip_dir.absolute(), atoms=ats, confs_path=confs_path.absolute(), function_to_compute=run_MTP, params_to_compute=params_to_compute)
+
+        # this creates an ase.Atoms object with struct + props of old + new confs           
+        # called {confs_name}
         # now configurations.traj contains (old + new) (structs + props)
-
+    
+    
+    
     # EXTRACT IFCs; we don't need third-order ifcs, because canonical configurations doesn't consider them
-
-    ifc_dir = f'{root_dir}ifc/'
-    os.system(f'mkdir -p {ifc_dir}')
-    ifc_save_dir = f'{root_dir}ifc_savings/'
-    os.system(f'mkdir -p {ifc_save_dir}')
+    ifc_dir = root_dir.joinpath('ifc')
+    ifc_dir.mkdir(parents=True, exist_ok=True)
+    ifc_save_dir = root_dir.joinpath('ifc_savings')
+    ifc_save_dir.mkdir(parents=True, exist_ok=True)
 
     # now we make the infiles
-    os.system(f'ln -s -f {uc_path} {ifc_dir}')
-    os.system(f'ln -s -f {ss_path} {ifc_dir}')
-    ats = read(confs_path, index=':')
+    os.system(f'ln -s -f {uc_path.absolute()} {ifc_dir.absolute()}')
+    os.system(f'ln -s -f {ss_path.absolute()} {ifc_dir.absolute()}')
+    ats = read(confs_path.absolute(), index=':')
 
-    tdp.make_forces(ats, ifc_dir)
-    tdp.make_positions(ats, ifc_dir)
-    tdp.make_stat(ats, ifc_dir)
-    l.log(f'len ats: {len(ats)}')
-    tdp.make_meta(ats, ifc_dir, temp=T)
-
+    tdp.make_forces(ats, ifc_dir.absolute())
+    tdp.make_positions(ats, ifc_dir.absolute())
+    tdp.make_stat(ats, ifc_dir.absolute())
+    tdp.make_meta(ats, ifc_dir.absolute(), temp=T)
+    
+    
     if loto == True:
-        os.system(f'ln -s -f {loto_path} {ifc_dir}')
+        os.system(f'ln -s -f {loto_path.absolute()} {ifc_dir.absolute()}')
         polar = '--polar'
     else:
         polar = ''
 
-    cmd = f'{mpirun} extract_forceconstants -rc2 {rc2} -rc3 {rc3} {polar} -U0 {first_order}'
-    with open(f'{ifc_dir}ifc_log', 'w') as log, open(f'{ifc_dir}ifc_err', 'w') as err:
-        run(cmd.split(), cwd=ifc_dir, stdout=log, stderr=err)
-    ifc_path = f'{ifc_dir}outfile.forceconstant'
+    cmd = f'{mpirun} {tdp_bin_dir.joinpath("extract_forceconstants").absolute()} -rc2 {rc2} -rc3 {rc3} {polar} -U0 {first_order}'
+    logpath = ifc_dir.joinpath("log_ifc")
+    errpath = ifc_dir.joinpath("err_ifc")
+    with open(logpath.absolute(), 'w') as log, open(errpath.absolute(), 'w') as err:
+        run(cmd.split(), cwd=ifc_dir.absolute(), stdout=log, stderr=err)
+    ifc_path = ifc_dir.joinpath('outfile.forceconstant')
     ifc_save_name = 'outfile.forceconstant_0'
-    save_ifc(ifc_path, ifc_save_name, ifc_save_dir)
-
+    save_ifc(ifc_path.absolute(), ifc_save_name, ifc_save_dir.absolute())
+    l.log(f'Interatomic force constants have been extracted from the set of ({len(ats)}) configurations.')
+    l.log(f'----------------------------')
+    
     for n_iter in range(max_iter):
-        l.log(f'Iteration n. {n_iter}')
-        os.system(f'ln -s -f {ifc_path} {confs_dir}infile.forceconstant')
+        l.log(f'+-+-+-+-+-+-+-+-+-+-+-+-+-+-')
+        l.log(f'Iteration n. {n_iter + 2} started.')
+        os.system(f'ln -s -f {ifc_path.absolute()} {confs_dir.joinpath("infile.forceconstant").absolute()}')
         nconfs = nconfs_to_gen(n_iter, nconfs_start) 
-        tdp.make_canonical_configurations(nconf=nconfs, temp=T, quantum=quantum, dir=confs_dir, outfile_name=new_confs_name, pref_bin=mpirun)
+        tdp.make_canonical_configurations(nconf=nconfs, temp=T, quantum=quantum, dir=confs_dir.absolute(), outfile_name=new_confs_name, pref_bin='')
+        
         n_confs_done += nconfs
-        l.log(f'made {nconfs} configs')
+        l.log(f'{nconfs} new configurations have been generated.')
+        
         # compute en, for, str on the conf
-        ats = read(new_confs_path, index=':')
+        ats = read(new_confs_path.absolute(), index=':')
         #print(f'Just read {confs_path}: it has {len(ats)} confs')
-        compute_true_props(dir=mlip_dir, atoms=ats, confs_path=confs_path, function_to_compute= run_MTP, params_to_compute=params_to_compute)
+        compute_true_props(dir=mlip_dir, atoms=ats, confs_path=confs_path.absolute(), function_to_compute= run_MTP, params_to_compute=params_to_compute)
 
         # EXTRACT IFCs; we don't need third-order ifcs, because canonical configurations doesn't consider them
-        ats = read(confs_path, index=':')
-
-        tdp.make_forces(ats, ifc_dir)
-        tdp.make_positions(ats, ifc_dir)
-        tdp.make_stat(ats, ifc_dir)
-        tdp.make_meta(ats, ifc_dir, temp=T)
-
-        with open('ifc_log', 'w') as log, open('ifc_err', 'w') as err:
-            run(cmd.split(), cwd=ifc_dir, stdout=log, stderr=err)
+        ats = read(confs_path.absolute(), index=':')
+        
+        tdp.make_forces(ats, ifc_dir.absolute())
+        tdp.make_positions(ats, ifc_dir.absolute())
+        tdp.make_stat(ats, ifc_dir.absolute())
+        tdp.make_meta(ats, ifc_dir.absolute(), temp=T)
+        
+        logpath = Path('log_ifc')
+        errpath = Path('err_ifc')
+        with open(logpath.absolute(), 'w') as log, open(errpath.absolute(), 'w') as err:
+            run(cmd.split(), cwd=ifc_dir.absolute(), stdout=log, stderr=err)
         ifc_save_name = f'outfile.forceconstant_{n_iter + 1}'
-        save_ifc(ifc_path, ifc_save_name, ifc_save_dir)
+        save_ifc(ifc_path.absolute(), ifc_save_name, ifc_save_dir.absolute())
         
+        l.log(f'Interatomic force constants have been extracted from the set of ({len(ats)}) configurations.')
+        l.log(f'The check of the convergence criterion started.')
         # now let's check convergence
-        conv = check_convergence(conv_prop, confs_path=confs_path, root_dir=root_dir, thr=thr)
-        
+        conv = check_convergence(root_dir.absolute(), conv_prop, confs_path.absolute(), thr=thr)
         l.log(str(conv[1]))
         conv = conv[0]
-        plot_convergence(prop_conv)
+        #plot_convergence(conv_prop)
         save_prop()
         
         if conv == True:
-            l.log(f'The configurations converged after the {n_confs_done}-th one. Free energy: {prop_conv[-1][1]} eV')
+            l.log(f'The configurations converged after the {n_confs_done}-th one. Free energy: {conv_prop[-1][1]} eV')
             exit()
 
         if n_confs_done >= max_confs:
             l.log(f'Maximum number of configurations reached ({max_confs}) but the configurations were not converged.')
             exit()
-
+            
+        l.log(f'Still not converged.')
         l.log(f'{n_confs_done} have been done in {n_iter} iterations.')
+        l.log(f'----------------------------')
 
     if conv == False:
         l.log('The maximum number of iteration was reached but the calculation was not converged.')

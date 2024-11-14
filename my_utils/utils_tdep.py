@@ -2,24 +2,32 @@ import numpy as np
 from ase.io import read, write
 from ase.build import make_supercell
 import sys
-from .utils import from_list_of_numbs_to_text, path, data_reader
+from .utils import from_list_of_numbs_to_text, data_reader
 import os
 from subprocess import run
 from math import floor
 import h5py
 from matplotlib import pyplot as plt
 from pathlib import Path
+import shutil
+from copy import deepcopy as cp
 
-
+p = Path(shutil.which('extract_forceconstants')).parent
+if p is not None:
+    tdp_bin_dir = p
+else:
+    tdp_bin_dir = Path('./')
+        
 
 def get_xcart(path):
     '''
     Function to get the xcart (in Angstrom) of the end set from an .abo file. 
     '''
+    path = Path(path)
     natoms = 6
     positions = []
     tok = 0
-    lines = data_reader(path, separator='')
+    lines = data_reader(path.absolute(), separator='')
     for i, line in enumerate(lines):
         if 'END' in line:
             tok = 1
@@ -40,9 +48,10 @@ def get_cell(path):
     '''
     Function to get the cell (in Angstrom) from the end dataset of an .abo file
     '''
+    path = Path(path)
     cell = []
     tok = 0
-    lines = data_reader(path, separator='')
+    lines = data_reader(path.absolute(), separator='')
     for i, line in enumerate(lines):
         if 'END' in line:
             tok = 1
@@ -57,16 +66,16 @@ def get_cell(path):
                 rprim3 = np.array([float(lines[i+2][0]), float(lines[i+2][1]), float(lines[i+2][2])])
                 rprim = [rprim1* 0.529177249, rprim2* 0.529177249, rprim3* 0.529177249]
                 rprim = np.array(rprim)
-    rprimd = copy.deepcopy(rprim)
+    rprimd = cp(rprim)
     for i in range(len(rprim)):
         rprimd[i] = rprim[i] * acell[i]
     
     
     return rprimd, acell, rprim
 
-def merge_confs(n_conf, dir, pref='contcar_conf', filename='canonical_structures.traj'):
+def merge_confs(n_conf, dir, pref='aims_conf', filename='canonical_structures.traj'):
     '''
-    Function for merging the structured obtained with canonical_configuration and deleting the old individual-configuration files
+    Function for merging the structures obtained with canonical_configuration and deleting the old individual configuration files, ignoring the bugged or corrupted ones.
     Arguments:
     n_conf(int): number of configurations to merge
     dir(str): directory where the structure files are where the merged file will be
@@ -76,22 +85,28 @@ def merge_confs(n_conf, dir, pref='contcar_conf', filename='canonical_structures
     n_len = len(str(int(n_conf))) # number of digits of n_conf
     n_len = 4
     confs = []
-    dir = os.path.abspath(dir)
-    if not dir.endswith('/'):
-        dir += '/'
+    dir = Path(dir)
     
     for i in range(n_conf):
-        fname = f'{dir}{pref}{i+1:0>{n_len}d}'
+        fname = f'{pref}{i+1:0>{n_len}d}'
+        fpath = dir.joinpath(fname)
         try:
-            conf = read(fname, format='vasp')
-            confs.append(conf)
-        except:
+            conf = read(fpath.absolute(), format='aims')
+            print(f'{len(conf)}')
+            confs.append(cp(conf))
+            
+        except: # e.g. the file is bugged/corrupted
             pass
+
+        fpath.unlink(missing_ok=False) # now we can delete the original file
     if len(confs)>0:
-        write(f'{dir}{filename}', confs, format='traj')
-    for i in range(n_conf):
-        fname = f'{dir}{pref}{i+1:0>4d}'
-        os.system(f'rm {fname}')
+        write(dir.joinpath(filename).absolute(), confs, format='traj')
+        
+#     for i in range(n_conf):
+#         #fname = dir.joinpath(f'{pref}{i+1:0>4d}')
+        
+#         os.system(f'cp {fname.absolute()} /scratch/users/s/l/slongo/Work/ML/MoS2/new_mlacs/sTDEP/debug/')
+#         fname.unlink(missing_ok=True)
     return len(confs)
 
 def make_stat(confs, dir):
@@ -101,6 +116,7 @@ def make_stat(confs, dir):
     confs(list): ASE trajectory
     dir(str): directory where the infile will be printed
     '''
+    dir = Path(dir)
     text = ''
     for i, atoms in enumerate(confs):
         time = 0
@@ -112,7 +128,7 @@ def make_stat(confs, dir):
         press = -1/3 * (stress[0] + stress[1] + stress[2])
         line = f'{i+1}\t{time}\t{Etot}\t{Epot}\t{Ekin}\t{temp}\t{press}\t{stress[0]}\t{stress[1]}\t{stress[2]}\t{stress[3]}\t{stress[4]}\t{stress[5]}'
         text += line + '\n'
-    with open(f'{dir}infile.stat', 'w') as fl:
+    with open(dir.joinpath('infile.stat').absolute(), 'w') as fl:
         fl.write(text)
 
 def make_fake_stat(confs, dir, temp):
@@ -124,6 +140,7 @@ def make_fake_stat(confs, dir, temp):
     dir(str): directory where the infile will be printed
     temp(float): temperature
     '''
+    dir = Path(dir)
     text = ''
     for i, atoms in enumerate(confs):
         time = 0
@@ -135,7 +152,7 @@ def make_fake_stat(confs, dir, temp):
         press = 0
         line = f'{i+1}\t{time}\t{Etot}\t{Epot}\t{Ekin}\t{temp}\t{press}\t{stress[0]}\t{stress[1]}\t{stress[2]}\t{stress[3]}\t{stress[4]}\t{stress[5]}'
         text += line + '\n'
-    with open(f'{dir}infile.stat', 'w') as fl:
+    with open(dir.joinpath('infile.stat').absolute(), 'w') as fl:
         fl.write(text)
 
 def make_positions(confs, dir):
@@ -145,12 +162,13 @@ def make_positions(confs, dir):
     confs(list): ASE trajectory
     dir(str): directory where the infile will be printed
     '''
+    dir = Path(dir)
     pos = []
     for atoms in confs:
         pos.extend([[x[0], x[1], x[2]] for x in atoms.get_scaled_positions()])
     
     text = from_list_of_numbs_to_text(pos)
-    with open(f'{dir}infile.positions', 'w') as fl:
+    with open(dir.joinpath('infile.positions').absolute(), 'w') as fl:
         fl.write(text)
 
 
@@ -161,12 +179,13 @@ def make_forces(confs, dir):
     confs(list): ASE trajectory
     dir(str): directory where the infile will be printed
     '''
+    dir = Path(dir)
     forces = []
     for atoms in confs:
         forces.extend([[x[0], x[1], x[2]] for x in atoms.get_forces()])
     
     text = from_list_of_numbs_to_text(forces)
-    with open(f'{dir}infile.forces', 'w') as fl:
+    with open(dir.joinpath('infile.forces').absolute(), 'w') as fl:
         fl.write(text)
 
 def make_fake_forces(confs, dir):
@@ -177,12 +196,13 @@ def make_fake_forces(confs, dir):
     confs(list): ASE trajectory
     dir(str): directory where the infile will be printed
     '''
+    dir = Path(dir)
     forces = []
     for atoms in confs:
         for i in range(len(atoms)):
             forces.append([0, 0, 0])
     text = from_list_of_numbs_to_text(forces)
-    with open(f'{dir}infile.forces', 'w') as fl:
+    with open(dir.joinpath('infile.forces').absolute(), 'w') as fl:
         fl.write(text)
 
 def make_meta(confs, dir, timestep=1, temp=None):
@@ -193,7 +213,8 @@ def make_meta(confs, dir, timestep=1, temp=None):
     dir(str): directory where the infile will be printed
     temp(float): the temperature to consider. If None, it will be set as the average of all confs.
     '''
-    if temp == None:
+    dir = Path(dir)
+    if temp is None:
         tmp = np.array([x.get_temperature() for x in confs])
         temp = np.mean(tmp)
     text = ''
@@ -201,10 +222,10 @@ def make_meta(confs, dir, timestep=1, temp=None):
     text += str(len(confs)) + '\n'
     text += '1\n'
     text += str(temp)
-    with open(f'{dir}infile.meta', 'w') as fl:
+    with open(dir.joinpath('infile.meta').absolute(), 'w') as fl:
         fl.write(text)
 
-def make_canonical_configurations(nconf, temp, quantum, dir, outfile_name, max_freq=False, pref_bin=''):
+def make_canonical_configurations(nconf, temp, quantum, dir, outfile_name, max_freq=False, pref_bin='', tdp_bin_dir=tdp_bin_dir):
     '''
     Function to launch tdep canonical-configurations specifying only the number of confs, the temperature and
     the quantum flag. After this, all (non bugged) files are merged in a single ASE traj (outfile_name).
@@ -215,7 +236,11 @@ def make_canonical_configurations(nconf, temp, quantum, dir, outfile_name, max_f
     quantum(bool): True: quantum phonon distribution; False: classical phonon distribution
     dir(str): path to the directory where to do this (note that infiles must be present)
     outfile_name(str): name of the final ASE trajectory (must include extension) containing the configurations.
+    tdp_bin_dir(str): path to the directory containing the tdep binaries
     '''
+    if tdp_bin_dir is not None:
+        tdp_bin_dir = Path(tdp_bin_dir)
+    dir = Path(dir)
     
 # *1: sometime canonical-configuration creates some bugged configuration file. Then, after the generation,
 #     all files are merged using tdp.merge_confs(), which only merges the files that are not bugged.
@@ -232,36 +257,41 @@ def make_canonical_configurations(nconf, temp, quantum, dir, outfile_name, max_f
         max_freq = f'--maximum_frequency {max_freq}'
     else:
         max_freq = ''
+            
     while tok < 1:
         if quantum == True:
-            cmd = f'{pref_bin} canonical_configuration -n {nconf} -t {temp} {max_freq} --quantum'
+            cmd = f'{pref_bin} {tdp_bin_dir.joinpath("canonical_configuration").absolute()} -of 4 -n {nconf} -t {temp} {max_freq} --quantum'
         elif quantum == False:
-            cmd = f'{pref_bin} canonical_configuration -n {nconf} -t {temp} {max_freq}'
-            
-        with open(f'{dir}cs_log', 'w') as log, open(f'{dir}cs_err', 'w') as err:
-            run(cmd.split(), cwd=dir, stdout=log, stderr=err)
+            cmd = f'{pref_bin} {tdp_bin_dir.joinpath("canonical_configuration").absolute()} -of 4 -n {nconf} -t {temp} {max_freq}'
         
-            # merge the confs available
-            n_done = merge_confs(n_conf=nconf, dir=dir, filename=outfile_name)
-            
-            # if a old merged confs file exists, it must be merged to the new one and then deleted
-            if os.path.exists(f'{dir}old_{outfile_name}'):
-                if n_done>0:
-                    merged_traj = merge_trajs(f'{dir}old_{outfile_name}', f'{dir}{outfile_name}')
-                    write(f'{dir}{outfile_name}', merged_traj)
-                    os.system(f'rm {dir}old_{outfile_name}')
-                else:
-                    os.system(f'mv {dir}old_{outfile_name} {dir}{outfile_name}')
-                    
-            # now check that the newly generated confs are as many as we needed; see *1 above
-            if n_done == nconf:
-                tok = 1 # if all is ok, then we can exit the loop
+        logpath = dir.joinpath('log_cs')
+        errpath = dir.joinpath('err_cs')
+        with open(logpath.absolute(), 'w') as log, open(errpath.absolute(), 'w') as err:
+            run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)
+        print(f'command: {cmd}')    
+        # merge the confs available
+        n_done = merge_confs(n_conf=nconf, dir=dir.absolute(), filename=outfile_name)
+
+        # if an old mergexd-confs file exists, it must be merged to the new one and then deleted
+        if dir.joinpath(f'old_{outfile_name}').exists():
+            if n_done>0:
+                merged_traj = merge_trajs(dir.joinpath(f'old_{outfile_name}'), dir.joinpath(outfile_name))
+                write(dir.joinpath(outfile_name), merged_traj)
+                dir.joinpath(f'old_{outfile_name}').unlink(missing_ok=True)
             else:
-                # if we need more confs we change name to the merged confs file and go back for another iteration
-                # with the remaining number of confs to generate
-                if os.path.exists(f'{dir}{outfile_name}'):
-                    os.system(f'mv {dir}{outfile_name} {dir}old_{outfile_name}')
-                nconf -= n_done
+                dir.joinpath(f'old_{outfile_name}').replace(dir.joinpath(outfile_name))
+
+        # now check that the newly generated confs are as many as we needed; see *1 above
+        if n_done == nconf:  # nconf = n. of conf to generate; n_done = n. of non bugged confs actually generated
+            tok = 1 # if all is ok, then we can exit the loop
+        else:
+            # if we need more confs we change name to the merged confs file and go back for another iteration
+            # with the remaining number of confs to generate
+            if dir.joinpath(outfile_name).exists(): # we do this only if we actually have at least one non bugged
+                                                # conf to save before going to the next iteration
+                dir.joinpath(outfile_name).replace(dir.joinpath(f'old_{outfile_name}'))
+            nconf -= n_done
+            print(f'{nconf} out of {nconf + n_done} configurations are bugged; re-generation will be attempted.')
 
 def extract_msd(fname, T, masses, ncells, quantum):
     '''
@@ -285,7 +315,7 @@ def extract_msd(fname, T, masses, ncells, quantum):
     def classical(freq, T):
         return -0.5 + (k * T) / (hbar * freq)
 
-    
+    fname = Path(fname)
     if quantum == True:
         dist_func = bose_einstein
     elif quantum == False:
@@ -299,7 +329,7 @@ def extract_msd(fname, T, masses, ncells, quantum):
     masses = np.repeat(np.array(masses, dtype=float), 3)
     massesm1 = 1./masses
 
-    fl = h5py.File(fname, 'r')
+    fl = h5py.File(fname.absolute(), 'r')
     
     evcti = np.array(fl['eigenvectors_im'], dtype=float)
     evctr = np.array(fl['eigenvectors_re'], dtype=float)
@@ -334,28 +364,34 @@ def make_anharmonic_free_energy(dir='./', bin_path=None, mpirun='', qgrid=None, 
     stochastic(bool): True: a stochastic sampling was used; False: a time-evolution sampling (e.g. MD) was used
     quantum(bool): include quantum effects
     '''
-    dir = path(dir) 
+    if dir is not None:
+        dir = Path(dir) 
     
-    bin_path = 'anharmonic_free_energy' if bin_path == None else bin_path
+    if bin_path is None:
+        bin_path = tdp_bin_dir.joinpath('anharmonic_free_energy')
+    else:
+        bin_path = Path(bin_path)
         
-    qgrid = '' if qgrid == None else f'-qg {qgrid}'
+    qgrid = '' if qgrid is None else f'-qg {qgrid}'
     
-    third_order = '--thirdorder' if third_order == True else ''
+    thirdorder = '--thirdorder' if thirdorder == True else ''
     
     stochastic = '--stochastic' if stochastic == True else ''
     
     quantum = '--quantum' if quantum == True else ''
     
-    cmd = f'{mpirun} {bin_path} {qgrid} {third_order} {stochastic} {quantum}'
-    with open(f'{dir}fe_log', 'w') as log, open(f'{dir}fe_err', 'w') as err:
-        run(cmd.split(), wdir=dir, stdout=log, stderr=err)
+    cmd = f'{mpirun} {bin_path.absolute()} {qgrid} {thirdorder} {stochastic} {quantum}'
+    logpath = dir.joinpath('log_fe')
+    errpath = dir.joinpath('err_fe')
+    with open(logpath.absolute(), 'w') as log, open(errpath.absolute(), 'w') as err:
+        run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)
     
     # extract the best approximation of the free energy from the outfile
-    with open(f'{dir}outfile.anharmonic_free_energy', 'r') as fl:
+    with open(dir.joinpath('outfile.anharmonic_free_energy'), 'r') as fl:
         lines = fl.readlines()
     fe = float(lines[-1].split()[1]) # in eV/atom
     
-    with open(f'{dir}infile.meta', 'r') as fl:
+    with open(dir.joinpath('infile.meta'), 'r') as fl:
         lines = fl.readlines()
     natoms = int(lines[0].split()[0])
     
@@ -366,7 +402,6 @@ def make_anharmonic_free_energy(dir='./', bin_path=None, mpirun='', qgrid=None, 
 
 
 def run_ifc_and_phonons(root_dir='./Tdep/',
-                        tdep_bin_directory='',
                         temperature=0,
                         sampling_path=None,
                         ucell=None,
@@ -382,7 +417,8 @@ def run_ifc_and_phonons(root_dir='./Tdep/',
                         unit=None,
                         nq=None,
                         read_path=False,
-                        dump_grid=False):
+                        dump_grid=False,
+                        tdp_bin_dir=tdp_bin_dir):
     '''
     Function to extract the ifcs (up to third order) and phonons, varying rc2, rc3 (for ifcs) and the qpts grid (for phonons)
     The results will be structured according to the following scheme:
@@ -412,7 +448,6 @@ def run_ifc_and_phonons(root_dir='./Tdep/',
     
     Args:
     root_dir(str, path): path to the directory where everything will be run; if not existing, it will be created
-    tdep_bin_directory(str, path): path to the directory containing the tdep binaries
     temperature(float): temperature
     sampling_path(str, path): path to the ASE trajectory containing the sampled configurations
     ucell(ase.atoms.Atoms): unit cell in ASE format
@@ -435,24 +470,29 @@ def run_ifc_and_phonons(root_dir='./Tdep/',
     path_file_path(str, path): path to the file containing the q-point path for the phonons (in tdep format, see docs); it is 
                                necessary when read_path=True
     dump_grid(bool): whether to dump the q-point grid data from the phonon calculation (see tdep docs).
+    tdp_bin_dir(str, path): path to the directory containing the tdep binaries, default: the global tdp_bin_dir variable
     '''
-
-    root_dir = path(root_dir)
-    if tdep_bin_directory != '':
-        tdpdir = path(tdep_bin_directory)
-    else:
-        tdpdir = ''
+    if root_dir is not None:
+        root_dir = Path(root_dir)
+        
+    if tdp_bin_dir is not None:
+        tdpdir = Path(tdp_bin_dir) # if it's already a Path(), this won't change anything
     
+    if sampling_path is not None:
+        sampling_path = Path(sampling_path)
+        
     # Check parameters for extract_forceconstant
     if lo_to == True:
         polar = '--polar'
+        if lo_to_file_path is not None:
+            lo_to_file_path = Path(lo_to_file_path)
     else:
         polar = ''
 
     # Check parameters for phonon_dispersion_relations
     if read_path == True:
         read_path = '-rp'
-        pfp = path(path_file_path)
+        pfp = Path(path_file_path)
     else:
         read_path = ''  
 
@@ -469,91 +509,95 @@ def run_ifc_and_phonons(root_dir='./Tdep/',
     else:
         dump_grid = ''
 
-    if nq == None:
+    if nq is None:
         nq = ''
     else:
         nq = f'-nq {nq}'
-    if unit == None:
+    if unit is None:
         unit = ''
     else:
         unit = f'--unit {unit}'
 
 
-    os.system(f'mkdir -p {root_dir}')
+    root_dir.mkdir(parents=True, exist_ok=True)
 
     # SAMPLED CONFS
-    traj = read(sampling_path, index=':')
+    traj = read(sampling_path.absolute(), index=':')
 
 
     # INFILES
-    infiles_dir = f'{root_dir}infiles/'
-    os.system(f'mkdir -p {infiles_dir}')
+    infiles_dir = root_dir.joinpath('infiles')
+    infiles_dir.mkdir(parents=True, exist_ok=True)
     #os.system(f'ln -s -f {root_dir}../T{temperature}K.traj {infiles_dir}/')
-    os.system(f'ln -s -f {sampling_path} {infiles_dir}')
-    write(f'{infiles_dir}infile.ucposcar', ucell, format='vasp')
-    write(f'{infiles_dir}infile.ssposcar', scell, format='vasp')
-    make_forces(traj, infiles_dir)
-    make_positions(traj, infiles_dir)
-    make_meta(traj, infiles_dir, timestep=1, temp=temperature)
-    make_stat(traj, infiles_dir)
+    os.system(f'ln -s -f {sampling_path.absolute()} {infiles_dir.absolute()}')
+    write(infiles_dir.joinpath('infile.ucposcar').absolute(), ucell, format='vasp')
+    write(infiles_dir.joinpath('infile.ssposcar').absolute(), scell, format='vasp')
+    make_forces(traj, infiles_dir.absolute())
+    make_positions(traj, infiles_dir.absolute())
+    make_meta(traj, infiles_dir.absolute(), timestep=1, temp=temperature)
+    make_stat(traj, infiles_dir.absolute())
 
 
     # START DOING THINGS
     ifc_pref = 'ifc'
-    ifc_dir = f'{root_dir}ifc/'
-    os.system(f'mkdir -p {ifc_dir}')
+    ifc_dir = root_dir.joinpath(ifc_pref)
+    ifc_dir.mkdir(parents=True, exist_ok=True)
 
     for rc2 in rc2s:
         rc2_pref = f'rc2_{rc2}'
-        rc2_dir = f'{ifc_dir}{rc2_pref}/'
-        os.system(f'mkdir -p {rc2_dir}')
+        rc2_dir = ifc_dir.joinpath(rc2_pref)
+        rc2_dir.mkdir(parents=True, exist_ok=True)
 
         for rc3 in rc3s:
             rc3_pref = f'rc3_{rc3}'
-            rc3_dir = f'{rc2_dir}{rc3_pref}/'
-            os.system(f'mkdir -p {rc3_dir}')
+            rc3_dir = rc2_dir.joinpath(rc3_pref)
+            rc3_dir.mkdir(parents=True, exist_ok=True)
 
             # linking infiles
-            os.system(f'ln -s -f {infiles_dir}infile.ucposcar {rc3_dir}')
-            os.system(f'ln -s -f {infiles_dir}infile.ssposcar {rc3_dir}')
-            os.system(f'ln -s -f {infiles_dir}infile.forces {rc3_dir}')
-            os.system(f'ln -s -f {infiles_dir}infile.positions {rc3_dir}')
-            os.system(f'ln -s -f {infiles_dir}infile.meta {rc3_dir}')
-            os.system(f'ln -s -f {infiles_dir}infile.stat {rc3_dir}')
+            os.system(f'ln -s -f {infiles_dir.joinpath("infile.ucposcar").absolute()} {rc3_dir.absolute()}')
+            os.system(f'ln -s -f {infiles_dir.joinpath("infile.ssposcar").absolute()} {rc3_dir.absolute()}')
+            os.system(f'ln -s -f {infiles_dir.joinpath("infile.forces").absolute()} {rc3_dir.absolute()}')
+            os.system(f'ln -s -f {infiles_dir.joinpath("infile.positions").absolute()} {rc3_dir.absolute()}')
+            os.system(f'ln -s -f {infiles_dir.joinpath("infile.meta").absolute()} {rc3_dir.absolute()}')
+            os.system(f'ln -s -f {infiles_dir.joinpath("infile.stat").absolute()} {rc3_dir.absolute()}')
             if lo_to == True:
-                os.system(f'ln -s -f {lo_to_file_path} {rc3_dir}')
+                os.system(f'ln -s -f {lo_to_file_path.absolute()} {rc3_dir.absolute()}')
 
-            cmd = f'{paralrun} {tdpdir}extract_forceconstants -rc2 {rc2} -rc3 {rc3} {polar}'
-            with open(f'{rc3_dir}ifc_log', 'w') as log, open(f'{rc3_dir}ifc_err', 'w') as err:
+            cmd = f'{paralrun} {tdpdir.joinpath("extract_forceconstants").absolute()} -rc2 {rc2} -rc3 {rc3} {polar}'
+            logpath = rc3_dir.joinpath('log_ifc')
+            errpath = rc3_dir.joinpath('err_ifc')
+            with open(logpath.absolute(), 'w') as log, open(errpath.absolute(), 'w') as err:
                 print(cmd.split())
-                run(cmd.split(), cwd=rc3_dir, stdout=log, stderr=err)
+                run(cmd.split(), cwd=rc3_dir.absolute(), stdout=log, stderr=err)
 
             ph_pref = 'phonons'
-            ph_dir = f'{rc3_dir}phonons/'
-            os.system(f'mkdir -p {ph_dir}')
+            ph_dir = rc3_dir.joinpath(ph_pref)
+            ph_dir.mkdir(parents=True, exist_ok=True)
 
             for i, qg in enumerate(qgs):
                 qg_pref = f'qg_{cub_root_gds[i]}x{cub_root_gds[i]}x{cub_root_gds[i]}'
-                qg_dir = f'{ph_dir}{qg_pref}/'
-                os.system(f'mkdir -p {qg_dir}')
+                qg_dir = ph_dir.joinpath(qg_pref)
+                ph_dir.mkdir(parents=True, exist_ok=True)
 
                 # linking infiles
-                os.system(f'ln -s -f {infiles_dir}infile.ucposcar {qg_dir}')
-                os.system(f'ln -s -f {infiles_dir}infile.ssposcar {qg_dir}')
-                os.system(f'ln -s -f {infiles_dir}infile.forces {qg_dir}')
-                os.system(f'ln -s -f {infiles_dir}infile.positions {qg_dir}')
-                os.system(f'ln -s -f {infiles_dir}infile.meta {qg_dir}')
-                os.system(f'ln -s -f {infiles_dir}infile.stat {qg_dir}')
-                os.system(f'ln -s -f {rc3_dir}outfile.forceconstant {qg_dir}infile.forceconstant')
-                os.system(f'ln -s -f {rc3_dir}outfile.forceconstant_thirdorder {qg_dir}infile.forceconstant_thirdorder')
+                os.system(f'ln -s -f {infiles_dir.joinpath("infile.ucposcar").absolute()} {qg_dir.absolute()}')
+                os.system(f'ln -s -f {infiles_dir.joinpath("infile.ssposcar").absolute()} {qg_dir.absolute()}')
+                os.system(f'ln -s -f {infiles_dir.joinpath("infile.forces").absolute()} {qg_dir.absolute()}')
+                os.system(f'ln -s -f {infiles_dir.joinpath("infile.positions").absolute()} {qg_dir.absolute()}')
+                os.system(f'ln -s -f {infiles_dir.joinpath("infile.meta").absolute()} {qg_dir.absolute()}')
+                os.system(f'ln -s -f {infiles_dir.joinpath("infile.stat").absolute()} {qg_dir.absolute()}')
+                os.system(f'ln -s -f {rc3_dir.joinpath("outfile.forceconstant").absolute()} {qg_dir.joinpath("infile.forceconstant").absolute()}')
+                os.system(f'ln -s -f {rc3_dir.joinpath("outfile.forceconstant_thirdorder").absolute()} {qg_dir.joinpath("infile.forceconstant_thirdorder").absolute()}')
 
                 if read_path == '-rp':
-                    os.system(f'ln -s -f {pfp}infile.qpoints_dispersion {qg_dir}')
+                    os.system(f'ln -s -f {pfp.joinpath("infile.qpoints_dispersion").absolute()} {qg_dir.absolute()}')
 
-                cmd = f'{paralrun} {tdpdir}phonon_dispersion_relations -qg {qg} {read_path} {dos} {dump_grid} {unit} {nq}'
-                with open(f'{qg_dir}ph_log', 'w') as log, open(f'{qg_dir}ph_err', 'w') as err:
+                cmd = f'{paralrun} {tdpdir.joinpath("phonon_dispersion_relations").absolute()} -qg {qg} {read_path} {dos} {dump_grid} {unit} {nq}'
+                logpath = qg_dir.joinpath('log_ph')
+                errpath = qg_dir.joinpath('err_ph')
+                with open(logpath.absolute(), 'w') as log, open(errpath.absolute(), 'w') as err:
                     print(cmd.split())
-                    run(cmd.split(), cwd=qg_dir, stdout=log, stderr=err)
+                    run(cmd.split(), cwd=qg_dir.absolute(), stdout=log, stderr=err)
 
 def errs_ifc_phonons(root_dir,
                      rc2s,
@@ -601,27 +645,27 @@ def errs_ifc_phonons(root_dir,
                 err.append((new[i]-old[i])/abs(old[i]))
         return np.array(err)
 
-    root_dir = path(root_dir)
+    root_dir = Path(root_dir)
     ifc_pref = 'ifc'
-    ifc_dir = f'{root_dir}{ifc_pref}/'
+    ifc_dir = root_dir.joinpath('ifc_pref')
     
     res = []
     
     for rc2 in rc2s:
         rc2_pref = f'rc2_{rc2}'
-        rc2_dir = f'{ifc_dir}{rc2_pref}/'
+        rc2_dir = ifc_dir.joinpath(rc2_pref)
 
         for rc3 in rc3s:
             rc3_pref = f'rc3_{rc3}'
-            rc3_dir = f'{rc2_dir}{rc3_pref}/'
+            rc3_dir = rc2_dir.joinpath(rc3_pref)
             ph_pref = 'phonons'
-            ph_dir = f'{rc3_dir}phonons/'
+            ph_dir = rc3_dir.joinpath('phonons')
             for i, qg in enumerate(qgs):
                 qg_pref = f'qg_{qg}'
-                qg_dir = f'{ph_dir}{qg_pref}/'
+                qg_dir = ph_dir.joinpath(qg_pref)
                 filename = 'outfile.dispersion_relations'
-                filepath = f'{qg_dir}{filename}'
-                with open(filepath, 'r') as fl:
+                filepath = qg_dir.joinpath(filename)
+                with open(filepath.absolute(), 'r') as fl:
                     lines = fl.readlines()
                 lines = np.array([line.split() for line in lines], dtype='float')
                 tmp_freqs = lines[:,1:].flatten()
@@ -659,11 +703,13 @@ def errs_ifc_phonons(root_dir,
 
 
 
-def parse_dielectric_tensors(filepath='run.abo'):
+def parse_dielectric_tensors(filepath=Path('run.abo')):
     '''
     Function to parse the dielectric tensor from the abinit abo file
     '''
-    with open(filepath, 'r') as fl:
+    if filepath is not None:
+        filepath = Path(filepath)
+    with open(filepath.absolute(), 'r') as fl:
         lines = fl.readlines()
     for i, line in enumerate(lines):
         if 'Dielectric tensor' in line:
@@ -676,7 +722,7 @@ def parse_dielectric_tensors(filepath='run.abo'):
             mat[i,j] = float(extract[i*3 + j].split()[4])
     return mat
 
-def write_dielectric_tensors(natoms, wdir='./', atomic=False, outfilepath=None):
+def write_dielectric_tensors(natoms, wdir=Path('./'), atomic=False, outfilepath=None):
     '''
     Function to write the input file for the raman calculation 'infile.dielectric_tensor'.
     There are two possibilities: atomic displacements and mode displacements.
@@ -695,26 +741,28 @@ def write_dielectric_tensors(natoms, wdir='./', atomic=False, outfilepath=None):
                         tensors (p/m) for all the mode displacements.
     '''
     
-    wdir = path(wdir)
-    if outfilepath == None:
-        outfilepath = f'{wdir}infile.dielectric_tensor'
+    if wdir is not None:
+        wdir = Path(wdir)
+        
+    if outfilepath is None:
+        outfilepath = wdir.joinpath('infile.dielectric_tensor')
         
     if atomic == False: # MODE DISPLACEMENTS
         # check that all the modes are there
         bad = 0
         for i in range(3, natoms * 3):
-            mode_dir = path(f'{wdir}{i}_mode')
-            if not os.path.exists(mode_dir):
-                print(f"The folder '{mode_dir}' is missing.")
+            mode_dir = wdir.joinpath(f'{i}_mode')
+            if not mode_dir.exists():
+                print(f"The folder '{mode_dir.absolute()}' is missing.")
                 bad = 1
             else:
                 for pm in ['plus', 'minus']:
-                    displ_dir = f'{mode_dir}{pm}/run.abo'
-                    if not os.path.exists(displ_dir):
-                        print(f'There is no .abo file for the {pm} displacement of mode {i} ({displ_dir})')
+                    displ_dir = mode_dir.joinpath(f'{pm}/run.abo')
+                    if not displ_dir.exists():
+                        print(f'There is no .abo file for the {pm} displacement of mode {i} ({displ_dir.absolute()})')
                         bad = 1
                     else:
-                        with open(f'{displ_dir}') as fl:
+                        with open(displ_dir.absolute(), 'r') as fl:
                             if all(['Overall time' not in x for x in fl.readlines()]):
                                 print(f'The calculation of the {pm} displacement of the mode {i} is not completed!')
                         bad = 1
@@ -724,12 +772,12 @@ def write_dielectric_tensors(natoms, wdir='./', atomic=False, outfilepath=None):
         txt = ''
         for i in range(3, natoms*3):
             # positive mode displ.
-            filepath = f'{wdir}{i}_mode/plus/run.abo'
-            tens_p = parse_dielectric_tensors(filepath)
+            filepath = wdir.joinpath(f'{i}_mode/plus/run.abo')
+            tens_p = parse_dielectric_tensors(filepath.absolute())
             
             # negative mode displ.
-            filepath = f'{wdir}{i}_mode/minus/run.abo'
-            tens_m = parse_dielectric_tensors(filepath)
+            filepath = wdir.joinpath(f'{i}_mode/minus/run.abo')
+            tens_m = parse_dielectric_tensors(filepath.absolute())
             
             # write both
             txt += f'{tens_p[0,0]:.5f} {tens_p[0,1]:.5f} {tens_p[0,2]:.5f}\n'
@@ -739,7 +787,7 @@ def write_dielectric_tensors(natoms, wdir='./', atomic=False, outfilepath=None):
             txt += f'{tens_m[0,0]:.5f} {tens_m[0,1]:.5f} {tens_m[0,2]:.5f}\n'
             txt += f'{tens_m[1,0]:.5f} {tens_m[1,1]:.5f} {tens_m[1,2]:.5f}\n'
             txt += f'{tens_m[2,0]:.5f} {tens_m[2,1]:.5f} {tens_m[2,2]:.5f}\n'
-        with open(outfilepath, 'w') as fl:
+        with open(outfilepath.absolute(), 'w') as fl:
             fl.write(txt)
             
             
@@ -749,18 +797,18 @@ def write_dielectric_tensors(natoms, wdir='./', atomic=False, outfilepath=None):
         bad = 0
         for i in range(1, natoms+1):
             for d in ['x', 'y', 'z']:
-                displ_dir = f'{wdir}displacement_{i:0{3}d}_{d}'
-                if not os.path.exists(displ_dir):
-                    print(f"The folder '{displ_dir}' is missing.")
+                displ_dir = wdir.joinpath(f'displacement_{i:0{3}d}_{d}')
+                if not displ_dir.exists():
+                    print(f"The folder '{displ_dir.absolute()}' is missing.")
                     bad = 1
                 else:
                     for pm in ['plus', 'minus']:
-                        filepath = f'{displ_dir}/{pm}/run.abo'
-                        if not os.path.exists(filepath):
-                            print(f'There is no .abo file for the {pm} displacement of atom {i} along {d} ({filepath})')
+                        filepath = displ_dir.joinpath(f'{pm}/run.abo')
+                        if not filepath.exists():
+                            print(f'There is no .abo file for the {pm} displacement of atom {i} along {d} ({filepath.absolute()})')
                             bad = 1
                         else:
-                            with open(filepath) as fl:
+                            with open(filepath.absolute()) as fl:
                                 if all(['Overall time' not in x for x in fl.readlines()]):
                                     print(f'The calculation of the {pm} displacement of the mode {i} is not completed!')
                                     bad = 1
@@ -772,12 +820,12 @@ def write_dielectric_tensors(natoms, wdir='./', atomic=False, outfilepath=None):
         for i in range(1, natoms+1):
             for d in ['x', 'y', 'z']:
                 # positive atomic displ.
-                filepath = f'{wdir}displacement_{i:0{3}d}_{d}/plus/run.abo'
-                tens_p = parse_dielectric_tensors(filepath)
+                filepath = wdir.joinpath(f'displacement_{i:0{3}d}_{d}/plus/run.abo')
+                tens_p = parse_dielectric_tensors(filepath.absolute())
 
                 # negative atomic displ.
-                filepath = f'{wdir}displacement_{i:0{3}d}_{d}/minus/run.abo'
-                tens_m = parse_dielectric_tensors(filepath)
+                filepath = wdir.joinpath(f'displacement_{i:0{3}d}_{d}/minus/run.abo')
+                tens_m = parse_dielectric_tensors(filepath.absolute())
 
                 # write both
                 txt += f'{tens_p[0,0]:.5f} {tens_p[0,1]:.5f} {tens_p[0,2]:.5f}\n'
@@ -787,7 +835,7 @@ def write_dielectric_tensors(natoms, wdir='./', atomic=False, outfilepath=None):
                 txt += f'{tens_m[0,0]:.5f} {tens_m[0,1]:.5f} {tens_m[0,2]:.5f}\n'
                 txt += f'{tens_m[1,0]:.5f} {tens_m[1,1]:.5f} {tens_m[1,2]:.5f}\n'
                 txt += f'{tens_m[2,0]:.5f} {tens_m[2,1]:.5f} {tens_m[2,2]:.5f}\n'
-        with open(outfilepath, 'w') as fl:
+        with open(outfilepath.absolute(), 'w') as fl:
             fl.write(txt)
 
             
@@ -806,8 +854,9 @@ def extract_diel_bec(filepath):
     diel_token = 0
     bec_token = 0
     natoms_token = 0
-
-    with open(filepath, 'r') as fl:
+    
+    filepath = Path(filepath)
+    with open(filepath.absolute(), 'r') as fl:
         lines = fl.readlines()
     for i, line in enumerate(lines):
         if bec_token == 1 and natoms_token == 1 and diel_token == 1:
@@ -847,12 +896,16 @@ def write_lotofile(inpath, outpath='./infile.lotosplitting'):
     inpath(str): path to the .abo
     outpath(str): path (with name) of the outputfile
     '''
-    dielt, becs = extract_diel_bec(inpath)
+    inpath = Path(inpath)
+    if outpath is not None:
+        outpath = Path(outpath)
+    
+    dielt, becs = extract_diel_bec(inpath.absolute())
     txt = ''
     for i in range(3):
             txt += f'{dielt[i,0]:.10f} {dielt[i,1]:.10f} {dielt[i,2]:.10f}\n'
     for bec in becs:
         for i in range(3):
             txt += f'{bec[i,0]:.10f} {bec[i,1]:.10f} {bec[i,2]:.10f}\n'
-    with open(outpath, 'w') as fl:
+    with open(outpath.absolute(), 'w') as fl:
         fl.write(txt)
