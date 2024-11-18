@@ -10,6 +10,7 @@ import os
 import sys
 from . import utils_tdep as tdp
 from . import utils_mlip as mlp
+from .utils import ln_s_f
 from subprocess import run
 import shutil
 from ase.calculators.singlepoint import SinglePointCalculator
@@ -33,7 +34,7 @@ class logger():
         text = f'{text}'
         print(text)
         with open(self.filepath.absolute(), 'a') as fl:
-            fl.write(text)
+            fl.write(f'{text}\n')
             
     
     
@@ -242,24 +243,14 @@ def run_stdep(root_dir=Path('./').absolute(),
         conv_dir.mkdir(parents=True, exist_ok=True)
         
         # first we need to copy the infiles
-        os.system(f'ln -s -f {root_dir.joinpath("ifc/infile.stat")} {conv_dir.joinpath("infile.stat").absolute()}')
-
-        os.system(f'ln -s -f {root_dir.joinpath("ifc/infile.meta").absolute()} {conv_dir.joinpath("infile.meta").absolute()}')
-              
-        os.system(f'ln -s -f {root_dir.joinpath("ifc/infile.positions").absolute()} ' + \
-                  f'{conv_dir.joinpath("infile.positions").absolute()}')
+        ln_s_f({root_dir.joinpath("ifc/infile.stat")}, conv_dir)
+        ln_s_f({root_dir.joinpath("ifc/infile.meta")}, conv_dir)
+        ln_s_f({root_dir.joinpath("ifc/infile.positions")}, conv_dir)
+        ln_s_f({root_dir.joinpath("ifc/infile.forces")}, conv_dir)
+        ln_s_f({root_dir.joinpath("ifc/outfile.forceconstant")}, conv_dir.joinpath("infile.forceconstant"))
+        ln_s_f({root_dir.joinpath("ifc/infile.ucposcar")}, conv_dir)
+        ln_s_f({root_dir.joinpath("ifc/infile.ssposcar")}, conv_dir)
         
-        os.system(f'ln -s -f {root_dir.joinpath("ifc/infile.forces").absolute()} ' + \
-                  f'{conv_dir.joinpath("infile.forces").absolute()}')
-                
-        os.system(f'ln -s -f {root_dir.joinpath("ifc/outfile.forceconstant").absolute()} ' + \
-                  f'{conv_dir.joinpath("infile.forceconstant").absolute()}')
-        
-        os.system(f'ln -s -f {root_dir.joinpath("infile.ucposcar").absolute()} ' + \
-                  f'{conv_dir.joinpath("infile.ucposcar").absolute()}')
-        
-        os.system(f'ln -s -f {root_dir.joinpath("infile.ssposcar").absolute()} ' + \
-                  f'{conv_dir.joinpath("infile.ssposcar").absolute()}')
                   
         #if os.path.exists(f'{root_dir}ifc/outfile.forceconstant_thirdorder'):
         #    os.system(f'ln -s -f {root_dir}ifc/outfile.forceconstant_thirdorder {conv_dir}infile.forces')
@@ -317,7 +308,7 @@ def run_stdep(root_dir=Path('./').absolute(),
         #    return limit
         #nconfs = offset
         #return offset + 2*n_iter
-        return offset + n_iter**(0.18 * n_iter**0.5)
+        return int(offset + n_iter**(0.18 * n_iter**0.5))
 
     def save_prop():
         save_free_energy()
@@ -386,7 +377,7 @@ def run_stdep(root_dir=Path('./').absolute(),
             l.log(f'You asked to apply LO-TO splitting, but file {root_dir.joinpath("infile.lotosplitting")} does not exist!')
             exit()
         else:
-            loto_path = f'{root_dir}infile.lotosplitting'
+            loto_path = root_dir.joinpath('infile.lotosplitting')
     if preexisting_ifc == True:
         if not root_dir.joinpath('infile.forceconstant').exists():
             l.log(f'You asked to use pre-existing ifcs, but file {root_dir.joinpath("infile.forceconstant")} does not exist!')
@@ -401,11 +392,11 @@ def run_stdep(root_dir=Path('./').absolute(),
     confs_dir = root_dir.joinpath('configurations')
     confs_dir.mkdir(parents=True, exist_ok=True)
 
-    os.system(f'ln -s -f {uc_path.absolute()} {confs_dir.absolute()}')
-    os.system(f'ln -s -f {ss_path.absolute()} {confs_dir.absolute()}')
+    ln_s_f(uc_path, confs_dir)
+    ln_s_f(ss_path, confs_dir)
 
     if preexisting_ifc == True:
-        os.system(f'ln -s -f {start_ifc_path.absolute()} {confs_dir.absolute()}')
+        ln_s_f(start_ifc_path, confs_dir)
 
 
     # reference structure
@@ -426,7 +417,7 @@ def run_stdep(root_dir=Path('./').absolute(),
     
     # COMPUTE TRUE PROPERTIES
     ats = read(new_confs_path.absolute(), index=':')
-    l.log(f'Compute true props for {len(ats)} confs')
+    l.log(f'Compute true props for {len(ats)} confs.')
     confs_name = 'configurations.traj' # name of the file containing the old structures that will be appended with the new ones + props
     confs_path = confs_dir.joinpath(confs_name)
     mlip_dir = root_dir.joinpath('mlip')
@@ -449,8 +440,8 @@ def run_stdep(root_dir=Path('./').absolute(),
     ifc_save_dir.mkdir(parents=True, exist_ok=True)
 
     # now we make the infiles
-    os.system(f'ln -s -f {uc_path.absolute()} {ifc_dir.absolute()}')
-    os.system(f'ln -s -f {ss_path.absolute()} {ifc_dir.absolute()}')
+    ln_s_f(uc_path, ifc_dir)
+    ln_s_f(ss_path, ifc_dir)
     ats = read(confs_path.absolute(), index=':')
 
     tdp.make_forces(ats, ifc_dir.absolute())
@@ -460,7 +451,7 @@ def run_stdep(root_dir=Path('./').absolute(),
     
     
     if loto == True:
-        os.system(f'ln -s -f {loto_path.absolute()} {ifc_dir.absolute()}')
+        ln_s_f(loto_path, ifc_dir)
         polar = '--polar'
     else:
         polar = ''
@@ -479,7 +470,7 @@ def run_stdep(root_dir=Path('./').absolute(),
     for n_iter in range(max_iter):
         l.log(f'+-+-+-+-+-+-+-+-+-+-+-+-+-+-')
         l.log(f'Iteration n. {n_iter + 2} started.')
-        os.system(f'ln -s -f {ifc_path.absolute()} {confs_dir.joinpath("infile.forceconstant").absolute()}')
+        ln_s_f(ifc_dir.joinpath('outfile.forceconstant'), confs_dir.joinpath('infile.forceconstant'))
         nconfs = nconfs_to_gen(n_iter, nconfs_start) 
         tdp.make_canonical_configurations(nconf=nconfs, temp=T, quantum=quantum, dir=confs_dir.absolute(), outfile_name=new_confs_name, pref_bin='')
         
@@ -510,7 +501,7 @@ def run_stdep(root_dir=Path('./').absolute(),
         l.log(f'The check of the convergence criterion started.')
         # now let's check convergence
         conv = check_convergence(root_dir.absolute(), conv_prop, confs_path.absolute(), thr=thr)
-        l.log(str(conv[1]))
+        #l.log(str(conv[1]))
         conv = conv[0]
         #plot_convergence(conv_prop)
         save_prop()
@@ -523,8 +514,8 @@ def run_stdep(root_dir=Path('./').absolute(),
             l.log(f'Maximum number of configurations reached ({max_confs}) but the configurations were not converged.')
             exit()
             
-        l.log(f'Still not converged.')
-        l.log(f'{n_confs_done} have been done in {n_iter} iterations.')
+        l.log(f'---> still not converged.')
+        l.log(f'{n_confs_done} configurations have been done in {n_iter} iterations.')
         l.log(f'----------------------------')
 
     if conv == False:

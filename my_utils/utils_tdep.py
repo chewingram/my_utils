@@ -2,7 +2,7 @@ import numpy as np
 from ase.io import read, write
 from ase.build import make_supercell
 import sys
-from .utils import from_list_of_numbs_to_text, data_reader
+from .utils import from_list_of_numbs_to_text, data_reader, ln_s_f
 import os
 from subprocess import run
 from math import floor
@@ -14,10 +14,9 @@ from copy import deepcopy as cp
 
 p = Path(shutil.which('extract_forceconstants')).parent
 if p is not None:
-    tdp_bin_dir = p
+    g_tdep_bin_directory = p
 else:
-    tdp_bin_dir = Path('./')
-        
+    g_tdep_bin_directory = Path('./')
 
 def get_xcart(path):
     '''
@@ -92,7 +91,6 @@ def merge_confs(n_conf, dir, pref='aims_conf', filename='canonical_structures.tr
         fpath = dir.joinpath(fname)
         try:
             conf = read(fpath.absolute(), format='aims')
-            print(f'{len(conf)}')
             confs.append(cp(conf))
             
         except: # e.g. the file is bugged/corrupted
@@ -225,7 +223,7 @@ def make_meta(confs, dir, timestep=1, temp=None):
     with open(dir.joinpath('infile.meta').absolute(), 'w') as fl:
         fl.write(text)
 
-def make_canonical_configurations(nconf, temp, quantum, dir, outfile_name, max_freq=False, pref_bin='', tdp_bin_dir=tdp_bin_dir):
+def make_canonical_configurations(nconf, temp, quantum, dir, outfile_name, max_freq=False, pref_bin='', tdep_bin_directory=None):
     '''
     Function to launch tdep canonical-configurations specifying only the number of confs, the temperature and
     the quantum flag. After this, all (non bugged) files are merged in a single ASE traj (outfile_name).
@@ -236,10 +234,14 @@ def make_canonical_configurations(nconf, temp, quantum, dir, outfile_name, max_f
     quantum(bool): True: quantum phonon distribution; False: classical phonon distribution
     dir(str): path to the directory where to do this (note that infiles must be present)
     outfile_name(str): name of the final ASE trajectory (must include extension) containing the configurations.
-    tdp_bin_dir(str): path to the directory containing the tdep binaries
+    tdep_bin_directory(str): path to the directory containing the tdep binaries
     '''
-    if tdp_bin_dir is not None:
-        tdp_bin_dir = Path(tdp_bin_dir)
+    
+    if tdep_bin_directory is None or tdep_bin_directory == '':
+        tdpdir = g_tdep_bin_directory
+    else:
+        tdpdir = Path(tdep_bin_directory) # if it's already a Path(), this won't change anything
+
     dir = Path(dir)
     
 # *1: sometime canonical-configuration creates some bugged configuration file. Then, after the generation,
@@ -260,15 +262,14 @@ def make_canonical_configurations(nconf, temp, quantum, dir, outfile_name, max_f
             
     while tok < 1:
         if quantum == True:
-            cmd = f'{pref_bin} {tdp_bin_dir.joinpath("canonical_configuration").absolute()} -of 4 -n {nconf} -t {temp} {max_freq} --quantum'
+            cmd = f'{pref_bin} {tdpdir.joinpath("canonical_configuration").absolute()} -of 4 -n {nconf} -t {temp} {max_freq} --quantum'
         elif quantum == False:
-            cmd = f'{pref_bin} {tdp_bin_dir.joinpath("canonical_configuration").absolute()} -of 4 -n {nconf} -t {temp} {max_freq}'
+            cmd = f'{pref_bin} {tdpdir.joinpath("canonical_configuration").absolute()} -of 4 -n {nconf} -t {temp} {max_freq}'
         
         logpath = dir.joinpath('log_cs')
         errpath = dir.joinpath('err_cs')
         with open(logpath.absolute(), 'w') as log, open(errpath.absolute(), 'w') as err:
             run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)
-        print(f'command: {cmd}')    
         # merge the confs available
         n_done = merge_confs(n_conf=nconf, dir=dir.absolute(), filename=outfile_name)
 
@@ -368,7 +369,7 @@ def make_anharmonic_free_energy(dir='./', bin_path=None, mpirun='', qgrid=None, 
         dir = Path(dir) 
     
     if bin_path is None:
-        bin_path = tdp_bin_dir.joinpath('anharmonic_free_energy')
+        bin_path = g_tdep_bin_directory.joinpath('anharmonic_free_energy')
     else:
         bin_path = Path(bin_path)
         
@@ -418,7 +419,7 @@ def run_ifc_and_phonons(root_dir='./Tdep/',
                         nq=None,
                         read_path=False,
                         dump_grid=False,
-                        tdp_bin_dir=tdp_bin_dir):
+                        tdep_bin_directory=None):
     '''
     Function to extract the ifcs (up to third order) and phonons, varying rc2, rc3 (for ifcs) and the qpts grid (for phonons)
     The results will be structured according to the following scheme:
@@ -470,13 +471,15 @@ def run_ifc_and_phonons(root_dir='./Tdep/',
     path_file_path(str, path): path to the file containing the q-point path for the phonons (in tdep format, see docs); it is 
                                necessary when read_path=True
     dump_grid(bool): whether to dump the q-point grid data from the phonon calculation (see tdep docs).
-    tdp_bin_dir(str, path): path to the directory containing the tdep binaries, default: the global tdp_bin_dir variable
+    tdep_bin_directory(str, path): path to the directory containing the tdep binaries, default: the global tdep_bin_directory variable
     '''
     if root_dir is not None:
         root_dir = Path(root_dir)
         
-    if tdp_bin_dir is not None:
-        tdpdir = Path(tdp_bin_dir) # if it's already a Path(), this won't change anything
+    if tdep_bin_directory is None or tdep_bin_directory == '':
+        tdpdir = g_tdep_bin_directory
+    else:
+        tdpdir = Path(tdep_bin_directory) # if it's already a Path(), this won't change anything
     
     if sampling_path is not None:
         sampling_path = Path(sampling_path)
@@ -529,7 +532,7 @@ def run_ifc_and_phonons(root_dir='./Tdep/',
     infiles_dir = root_dir.joinpath('infiles')
     infiles_dir.mkdir(parents=True, exist_ok=True)
     #os.system(f'ln -s -f {root_dir}../T{temperature}K.traj {infiles_dir}/')
-    os.system(f'ln -s -f {sampling_path.absolute()} {infiles_dir.absolute()}')
+    ln_s_f(sampling_path, infiles_dir)
     write(infiles_dir.joinpath('infile.ucposcar').absolute(), ucell, format='vasp')
     write(infiles_dir.joinpath('infile.ssposcar').absolute(), scell, format='vasp')
     make_forces(traj, infiles_dir.absolute())
@@ -554,20 +557,22 @@ def run_ifc_and_phonons(root_dir='./Tdep/',
             rc3_dir.mkdir(parents=True, exist_ok=True)
 
             # linking infiles
-            os.system(f'ln -s -f {infiles_dir.joinpath("infile.ucposcar").absolute()} {rc3_dir.absolute()}')
-            os.system(f'ln -s -f {infiles_dir.joinpath("infile.ssposcar").absolute()} {rc3_dir.absolute()}')
-            os.system(f'ln -s -f {infiles_dir.joinpath("infile.forces").absolute()} {rc3_dir.absolute()}')
-            os.system(f'ln -s -f {infiles_dir.joinpath("infile.positions").absolute()} {rc3_dir.absolute()}')
-            os.system(f'ln -s -f {infiles_dir.joinpath("infile.meta").absolute()} {rc3_dir.absolute()}')
-            os.system(f'ln -s -f {infiles_dir.joinpath("infile.stat").absolute()} {rc3_dir.absolute()}')
+            ln_s_f(infiles_dir.joinpath("infile.ucposcar"), rc3_dir)
+            ln_s_f(infiles_dir.joinpath("infile.ssposcar"), rc3_dir)
+            ln_s_f(infiles_dir.joinpath("infile.forces"), rc3_dir)
+            ln_s_f(infiles_dir.joinpath("infile.positions"), rc3_dir)
+            ln_s_f(infiles_dir.joinpath("infile.meta"), rc3_dir)
+            ln_s_f(infiles_dir.joinpath("infile.stat"), rc3_dir)
+            
+        
             if lo_to == True:
-                os.system(f'ln -s -f {lo_to_file_path.absolute()} {rc3_dir.absolute()}')
+                ln_s_f(lo_to_file_path, rc3_dir)
 
             cmd = f'{paralrun} {tdpdir.joinpath("extract_forceconstants").absolute()} -rc2 {rc2} -rc3 {rc3} {polar}'
             logpath = rc3_dir.joinpath('log_ifc')
             errpath = rc3_dir.joinpath('err_ifc')
             with open(logpath.absolute(), 'w') as log, open(errpath.absolute(), 'w') as err:
-                print(cmd.split())
+                #print(cmd.split())
                 run(cmd.split(), cwd=rc3_dir.absolute(), stdout=log, stderr=err)
 
             ph_pref = 'phonons'
@@ -577,20 +582,20 @@ def run_ifc_and_phonons(root_dir='./Tdep/',
             for i, qg in enumerate(qgs):
                 qg_pref = f'qg_{cub_root_gds[i]}x{cub_root_gds[i]}x{cub_root_gds[i]}'
                 qg_dir = ph_dir.joinpath(qg_pref)
-                ph_dir.mkdir(parents=True, exist_ok=True)
+                qg_dir.mkdir(parents=True, exist_ok=True)
 
                 # linking infiles
-                os.system(f'ln -s -f {infiles_dir.joinpath("infile.ucposcar").absolute()} {qg_dir.absolute()}')
-                os.system(f'ln -s -f {infiles_dir.joinpath("infile.ssposcar").absolute()} {qg_dir.absolute()}')
-                os.system(f'ln -s -f {infiles_dir.joinpath("infile.forces").absolute()} {qg_dir.absolute()}')
-                os.system(f'ln -s -f {infiles_dir.joinpath("infile.positions").absolute()} {qg_dir.absolute()}')
-                os.system(f'ln -s -f {infiles_dir.joinpath("infile.meta").absolute()} {qg_dir.absolute()}')
-                os.system(f'ln -s -f {infiles_dir.joinpath("infile.stat").absolute()} {qg_dir.absolute()}')
-                os.system(f'ln -s -f {rc3_dir.joinpath("outfile.forceconstant").absolute()} {qg_dir.joinpath("infile.forceconstant").absolute()}')
-                os.system(f'ln -s -f {rc3_dir.joinpath("outfile.forceconstant_thirdorder").absolute()} {qg_dir.joinpath("infile.forceconstant_thirdorder").absolute()}')
+                ln_s_f(infiles_dir.joinpath("infile.ucposcar"), qg_dir)
+                ln_s_f(infiles_dir.joinpath("infile.ssposcar"), qg_dir)
+                ln_s_f(infiles_dir.joinpath("infile.forces"), qg_dir)
+                ln_s_f(infiles_dir.joinpath("infile.positions"), qg_dir)
+                ln_s_f(infiles_dir.joinpath("infile.meta"), qg_dir)
+                ln_s_f(infiles_dir.joinpath("infile.stat"), qg_dir)
+                ln_s_f(rc3_dir.joinpath("outfile.forceconstant"), qg_dir.joinpath('infile.forceconstant'))
+                ln_s_f(rc3_dir.joinpath("outfile.forceconstant_thirdorder"), qg_dir.joinpath('infile.forceconstant_thirdorder'))
 
                 if read_path == '-rp':
-                    os.system(f'ln -s -f {pfp.joinpath("infile.qpoints_dispersion").absolute()} {qg_dir.absolute()}')
+                    ln_s_f(pfp.joinpath('infile.qpoints_dispersion'), qg_dir)
 
                 cmd = f'{paralrun} {tdpdir.joinpath("phonon_dispersion_relations").absolute()} -qg {qg} {read_path} {dos} {dump_grid} {unit} {nq}'
                 logpath = qg_dir.joinpath('log_ph')
@@ -647,7 +652,7 @@ def errs_ifc_phonons(root_dir,
 
     root_dir = Path(root_dir)
     ifc_pref = 'ifc'
-    ifc_dir = root_dir.joinpath('ifc_pref')
+    ifc_dir = root_dir.joinpath(ifc_pref)
     
     res = []
     

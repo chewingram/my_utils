@@ -5,7 +5,7 @@ import os
 import sys
 import shutil 
 import numbers
-
+from pathlib import Path
 
 def mkdir_warner(dir_path, interactive=False):
     '''Create a directory. If it already exists, the old one will be deleted. If interactive=True, the user will be asked whether to delete or not 
@@ -408,3 +408,14 @@ def path(path):
     if not path.endswith('/'):
         path = path + '/'
     return path
+
+def ln_s_f(origin, dest):
+    path1 = Path(origin)
+    path2 = Path(dest)
+
+    if path2.is_dir():
+        os.system(f'ln -s -f {path1.absolute()} {path2.joinpath(path1.name).absolute()}')
+    else:
+        os.system(f'ln -s -f {path1.absolute()} {path2.absolute()}')
+        
+    

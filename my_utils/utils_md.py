@@ -11,7 +11,7 @@ from mlacs.utilities.io_lammps import reconstruct_mlmd_trajectory
 import sys
 from .utils import path
 from .utils_mlip import calc_efs_from_ase, pot_from_pair_style
-import builtins
+import builtins    
 
 
 original_print = builtins.print
@@ -162,8 +162,8 @@ def run_md(ismpi = False,
                             dt = dt,
                             nsteps = nsteps,
                             loginterval = loginterval,
-                            logfile = Path('mlmd.log').absolute(),
-                            trajfile = Path('mlmd.traj').absolute(),
+                            logfile = 'mlmd.log',
+                            trajfile = 'mlmd.traj',
                             ptype=iso,
                             workdir = workdir.absolute())
         state.initialize_momenta(atoms) 
