@@ -1,15 +1,6 @@
 # SCRIPT TO RUN THE NPT TO EXPLORE THE PHACE SPACE ALONG THE CELL-DEGREES OF FREEDOM
 # AFTER THIS MULTIPLE INSTANCES OF NVT CAN BE RUN (DISCARDING SOME INITIAL TIMESTEPS) TO EXPLORE THE MOMENTUM- AND POSITION-D.O.F.
 
-import numpy as np
-import sys
-sys.path.append('/scratch/ulg/matnan/slongo/my_scripts/')
-from my_utils.utils_md import run_md
-from my_utils.utils import path
-import os
-from ase.io import read, write
-from pathlib import Path
-
 # MPIRUN
 mpirun =
 
@@ -21,13 +12,25 @@ nthrow =
 nproc =
 lmp_bin = 
 pair_style = 
-temperature = int(os.getcwd().split('/')[-3][1:-1])
-root_dir =
-root_dir = Path(root_dir)
 iso = 
-temp_dir = root_dir.joinpath(f'T{temperature}K')
+root_dir =
 mult_mat =
 ismpi =
+
+import numpy as np
+import sys
+sys.path.append('/scratch/ulg/matnan/slongo/my_scripts/')
+from my_utils.utils_md import run_md
+from my_utils.utils import path
+import os
+from ase.io import read, write
+from pathlib import Path
+
+temperature = int(os.getcwd().split('/')[-3][1:-1])
+
+root_dir = Path(root_dir)
+
+temp_dir = root_dir.joinpath(f'T{temperature}K')
 
 
 
