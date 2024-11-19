@@ -10,6 +10,7 @@ from my_utils.utils import path
 import os
 from ase.io import read, write
 from ase.build import make_supercell
+from ase.spacegroup.symmetrize import refine_symmetry
 import pymatgen
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
@@ -66,9 +67,10 @@ new_cell.set_cell(avg_npt_cell, True)
 
 if refine == True:
     # We symmetrize it
-    adapter = AseAtomsAdaptor()
-    analyzer = SpacegroupAnalyzer(adapter.get_structure(new_cell))
-    new_cell = adapter.get_atoms(analyzer.get_refined_structure())
+    #adapter = AseAtomsAdaptor()
+    #analyzer = SpacegroupAnalyzer(adapter.get_structure(new_cell))
+    #new_cell = adapter.get_atoms(analyzer.get_refined_structure())
+    refine_symmetry(new_cell)
 
 # We also save it
 avg_cell_path = temp_dir.joinpath(f'T{temperature}K_unitcell.json')

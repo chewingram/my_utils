@@ -156,7 +156,10 @@ def run_md(ismpi = False,
         else:
             press = None
             workdir = wdir.joinpath('NVT')
-
+        ## DEBUG
+        if not isnpt:
+            write(wdir.joinpath('save_atoms.traj'), atoms)
+        ####
         state = LammpsState(temperature,
                             press,
                             dt = dt,
@@ -191,7 +194,7 @@ def run_md(ismpi = False,
             new_ucell.set_cell(cell, True)
             write(wdir.joinpath(f'T{temperature}K_unitcell.json').absolute(), new_ucell) # write the cell into a file
 
-        # if it is NVT and the thermalised supercell is not there, then let us create a calculator and a new trajectory
+        # if it is NVT and the trajectory is not there, then let us create a calculator and a new trajectory
         # file in which we can store all the configurations we got wit the MD along with their energy computes with the
         # calculator.
         elif not wdir.joinpath(f'T{temperature}K.traj').exists():
