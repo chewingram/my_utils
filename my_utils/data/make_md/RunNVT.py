@@ -2,6 +2,23 @@
 # IT IS ASSUMED THAT 1 OR MORE NPT INSTANCES HAVE BEEN DONE AND THAT THEIR mlmd.traj ARE STORED INSIDE NPT/#_instance/NPT/ 
 # THE TXXXK_unitcell.json FILE MUST BE PRESENT INSIDE A FOLDER CALLED "NPT", WHICH IS USUALLY CREATED DURING THE NPT PHASE
 
+# MPIRUN
+mpirun = 
+# CELL REFINEMENT BOOLEAN
+refine =
+
+# PARAMETERS TO CHANGE FOR THE MD
+dt = 
+nsteps = 
+loginterval =
+nthrow =
+nproc = 
+lmp_bin = 
+pair_style =
+root_dir = 
+mult_mat = 
+ismpi = 
+
 import numpy as np
 import sys
 sys.path.append('/scratch/ulg/matnan/slongo/my_scripts/')
@@ -17,25 +34,10 @@ from ase.spacegroup.symmetrize import refine_symmetry
 #from pathlib import Path
 
 
-# MPIRUN
-mpirun = 
-# CELL REFINEMENT BOOLEAN
-refine =
-
-# PARAMETERS TO CHANGE FOR THE MD
-dt = 
-nsteps = 
-loginterval =
-nthrow =
-nproc = 
-lmp_bin = 
-pair_style =
 temperature = int(os.getcwd().split('/')[-1][1:-1])
-root_dir = 
+
 root_dir = Path(root_dir)
 temp_dir = root_dir.joinpath(f'T{temperature}K')
-mult_mat = 
-ismpi = 
 
 # As a first thing, we need a copy of the unit cell
 ucell_path = root_dir.joinpath(f'unitcell.poscar')
