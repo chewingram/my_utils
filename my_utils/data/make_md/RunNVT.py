@@ -11,10 +11,10 @@ import os
 from ase.io import read, write
 from ase.build import make_supercell
 from ase.spacegroup.symmetrize import refine_symmetry
-import pymatgen
-from pymatgen.io.ase import AseAtomsAdaptor
-from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
-from pathlib import Path
+#import pymatgen
+#from pymatgen.io.ase import AseAtomsAdaptor
+#from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+#from pathlib import Path
 
 
 # MPIRUN
