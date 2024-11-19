@@ -30,7 +30,7 @@ from ase.spacegroup.symmetrize import refine_symmetry
 #import pymatgen
 #from pymatgen.io.ase import AseAtomsAdaptor
 #from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
-#from pathlib import Path
+from pathlib import Path
 
 
 temperature = int(os.getcwd().split('/')[-1][1:-1])
