@@ -1,7 +1,7 @@
 # SCRIPT TO RUN THE NVT TO EXPLORE THE MOMENTUM- AND POSITION-D.O.F.
 # IT IS ASSUMED THAT 1 OR MORE NPT INSTANCES HAVE BEEN DONE AND THAT THEIR mlmd.traj ARE STORED INSIDE NPT/#_instance/NPT/ 
 # THE TXXXK_unitcell.json FILE MUST BE PRESENT INSIDE A FOLDER CALLED "NPT", WHICH IS USUALLY CREATED DURING THE NPT PHASE
-
+import numpy as np
 # MPIRUN
 mpirun = 
 # CELL REFINEMENT BOOLEAN
@@ -19,7 +19,6 @@ root_dir =
 mult_mat = 
 ismpi = 
 
-import numpy as np
 import sys
 sys.path.append('/scratch/ulg/matnan/slongo/my_scripts/')
 from my_utils.utils_md import run_md
