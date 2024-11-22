@@ -9,10 +9,12 @@ from ase.io import read, write
 from ase.build import make_supercell
 
 
-def extract_structure_for_abinit_input(structure, pseudos_dir, pseudos_extension):
+def extract_structure_for_abinit_input(structure, pseudos_dir, pseudos_format='custom', pseudos_names=None, pseudos_extension=None):
     '''
     Return a list of lines with acell, rprim, ntypat, znucl, typat, xred
     '''
+    if pseudos_format == 'custom' and pseudos_name is None:
+        raise ValueError('When pseudos_format = custom, pseudos_name must be a list with the names (EXTENSION EXCLUDED) of the pseudos')
     lines = []
     cell = structure.get_cell()
     atom_numbers = structure.get_atomic_numbers()
@@ -45,14 +47,17 @@ def extract_structure_for_abinit_input(structure, pseudos_dir, pseudos_extension
     lines.append(f'xred\n')
     for position in atomic_positions:
         lines.append(f'{position[0]:.20f} {position[1]:.20f} {position[2]:.20f}\n')
-    pseudos_names = []
-    inv_typats = {str(v): k for k, v in typats.items()}
-    for i in range(len(typats)):
-        numb = inv_typats[str(i+1)]
-        #symb = list(set(structure.get_chemical_symbols()))[i].lower()
-        symb = inv_atomic_numbers[str(numb)].lower()
-        name = f"{numb}{symb}.{pseudos_extension}"
-        pseudos_names.append(name)
+    if pseudos_format == 'custom':
+        pseudos_names = [f'{x}.{pseudos_extension}' for x in pasudos_names]
+    elif pseudos_format == 'ASE-MLACS':
+        pseudos_names = []
+        inv_typats = {str(v): k for k, v in typats.items()}
+        for i in range(len(typats)):
+            numb = inv_typats[str(i+1)]
+            #symb = list(set(structure.get_chemical_symbols()))[i].lower()
+            symb = inv_atomic_numbers[str(numb)].lower()
+            name = f"{numb}{symb}.{pseudos_extension}"
+            pseudos_names.append(name)
     lines.append(f"pseudos \"{', '.join(pseudos_names)}\"\n")
     lines.append(f"pp_dirpath \"{Path(pseudos_dir)}\"\n")
     return lines
