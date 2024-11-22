@@ -9,12 +9,10 @@ from ase.io import read, write
 from ase.build import make_supercell
 
 
-def extract_structure_for_abinit_input(structure, pseudos_dir, pseudos_format='custom', pseudos_names=None, pseudos_extension=None):
+def extract_structure_for_abinit_input(structure, pseudos_dir, pseudos_names=None, pseudos_extension=None):
     '''
     Return a list of lines with acell, rprim, ntypat, znucl, typat, xred
     '''
-    if pseudos_format == 'custom' and pseudos_name is None:
-        raise ValueError('When pseudos_format = custom, pseudos_name must be a list with the names (EXTENSION EXCLUDED) of the pseudos')
     lines = []
     cell = structure.get_cell()
     atom_numbers = structure.get_atomic_numbers()
@@ -47,9 +45,10 @@ def extract_structure_for_abinit_input(structure, pseudos_dir, pseudos_format='c
     lines.append(f'xred\n')
     for position in atomic_positions:
         lines.append(f'{position[0]:.20f} {position[1]:.20f} {position[2]:.20f}\n')
-    if pseudos_format == 'custom':
+    if pseudos_names is not None:
+        pseudos_names = sort(pseudos(names))
         pseudos_names = [f'{x}.{pseudos_extension}' for x in pasudos_names]
-    elif pseudos_format == 'ASE-MLACS':
+    else:
         pseudos_names = []
         inv_typats = {str(v): k for k, v in typats.items()}
         for i in range(len(typats)):
@@ -63,18 +62,27 @@ def extract_structure_for_abinit_input(structure, pseudos_dir, pseudos_format='c
     return lines
 
 
-def create_abinit_input(input_params=dict(), pseudos_dir='./', pseudos_extension='', structure=None, save=False, filepath=None):
+def create_abinit_input(input_params=dict(), pseudos_dir='./', pseudos_format='custom', pseudos_extension='', pseudos_names=None, structure=None, save=False, filepath=None):
             '''
             Function to create an ABINIT input.
             Args:
+            input_params(dict): dictionary with the abinit variables and values; only numbers or strings
+            pseudos_dir(str): directory where the pseudos are
+            pseudos_format(str): 
+                                - custom: a list of pseudos names, excluding the extension, must be given
+                                - ASE-MLACS: the list of names will be generated assuming they are of the form 1h, 2he, 3li, 16s
+            pseudos_extension(str): extension of the pseudos
+            pseudos_names(list): only for pseudos_format='custom'; list with the names (EXCLUDING THE EXTENSION) of the pseudos
             structure(ase.atoms.Atoms): ase Atoms object with the structure
             save(bool): True: the input file will be written
             filepath(str): mandatory if save=True (ignored otherwise); path of the file to write the input 
             '''
+            if pseudos_format == 'custom' and pseudos_names is None:
+                raise ValueError('When pseudos_format = custom, pseudos_name must be a list with the names (EXTENSION EXCLUDED) of the pseudos')
 
             lines = ["# Input for ABINIT written by my_utils #\n"]
                 # structure
-            lines.extend(extract_structure_for_abinit_input(structure, pseudos_dir, pseudos_extension))
+            lines.extend(extract_structure_for_abinit_input(structure, pseudos_format=pseudos_format, pseudos_dir=pseudos_dir, pseudos_extension=pseudos_extension, pseudos_names))
             lines.append('\n')
                 # other parameters
             for param in input_params.keys():
