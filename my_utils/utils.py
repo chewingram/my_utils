@@ -412,7 +412,7 @@ def path(path):
 def ln_s_f(origin, dest):
     path1 = Path(origin)
     path2 = Path(dest)
-
+    print(path1, path2)
     if path2.is_dir():
         os.system(f'ln -s -f {path1.absolute()} {path2.joinpath(path1.name).absolute()}')
     else:
