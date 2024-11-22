@@ -47,7 +47,7 @@ def extract_structure_for_abinit_input(structure, pseudos_dir, pseudos_names=Non
         lines.append(f'{position[0]:.20f} {position[1]:.20f} {position[2]:.20f}\n')
     if pseudos_names is not None:
         pseudos_names.sort()
-        pseudos_names = [f'{x}.{pseudos_extension}' for x in pasudos_names]
+        pseudos_names = [f'{x}.{pseudos_extension}' for x in pseudos_names]
     else:
         pseudos_names = []
         inv_typats = {str(v): k for k, v in typats.items()}
