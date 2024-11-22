@@ -77,12 +77,14 @@ def create_abinit_input(input_params=dict(), pseudos_dir='./', pseudos_format='c
             save(bool): True: the input file will be written
             filepath(str): mandatory if save=True (ignored otherwise); path of the file to write the input 
             '''
-            if pseudos_format == 'custom' and pseudos_names is None:
-                raise ValueError('When pseudos_format = custom, pseudos_name must be a list with the names (EXTENSION EXCLUDED) of the pseudos')
-
+            if pseudos_format == 'custom'
+                if pseudos_names is None:
+                    raise ValueError('When pseudos_format = custom, pseudos_name must be a list with the names (EXTENSION EXCLUDED) of the pseudos')
+            else:
+                pseudos_names = None
             lines = ["# Input for ABINIT written by my_utils #\n"]
                 # structure
-            lines.extend(extract_structure_for_abinit_input(structure, pseudos_format=pseudos_format, pseudos_dir=pseudos_dir, pseudos_extension=pseudos_extension, pseudos_names))
+            lines.extend(extract_structure_for_abinit_input(structure, pseudos_dir=pseudos_dir, pseudos_extension=pseudos_extension, pseudos_names=pseudos_names))
             lines.append('\n')
                 # other parameters
             for param in input_params.keys():
