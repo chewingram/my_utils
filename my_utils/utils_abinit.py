@@ -77,7 +77,7 @@ def create_abinit_input(input_params=dict(), pseudos_dir='./', pseudos_format='c
             save(bool): True: the input file will be written
             filepath(str): mandatory if save=True (ignored otherwise); path of the file to write the input 
             '''
-            if pseudos_format == 'custom'
+            if pseudos_format == 'custom':
                 if pseudos_names is None:
                     raise ValueError('When pseudos_format = custom, pseudos_name must be a list with the names (EXTENSION EXCLUDED) of the pseudos')
             else:
