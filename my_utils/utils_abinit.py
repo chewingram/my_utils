@@ -67,10 +67,10 @@ def create_abinit_input(input_params=dict(), pseudos_dir='./', pseudos_extension
             filepath(str): mandatory if save=True (ignored otherwise); path of the file to write the input 
             '''
 
-            lines = ["# Input for ABINIT written by PIOMLACS #\n"]
+            lines = ["# Input for ABINIT written by my_utils #\n"]
                 # structure
             lines.extend(extract_structure_for_abinit_input(structure, pseudos_dir, pseudos_extension))
-
+            lines.append('\n')
                 # other parameters
             for param in input_params.keys():
                 if isinstance(input_params[param], (int, float)):
