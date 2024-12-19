@@ -499,7 +499,7 @@ def setup_logging(logger_name=None, log_file=None, debug=False):
     
     # If tool_name is None, use the root logger
     if logger_name:
-        logger = logging.getLogger(tool_name)
+        logger = logging.getLogger(logger_name)
     else:
         logging.getLogger()
         logging.propagate = False
