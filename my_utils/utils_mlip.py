@@ -441,8 +441,9 @@ def make_comparison(is_ase1=True,
 
     Returns
     -------
-    errs: list of float
-        [rmse, mae, R2] 
+    errs: dict
+    dictionary whose key/vlaue elements are property/errors, where property can be 
+    {'energy', 'forces', 'stress'}, and errors is a list [rmse, mae, R2]. 
         
     '''
     
@@ -818,9 +819,13 @@ def train_pot_from_ase_tmp(mlip_bin,
     mtp_level: {2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 21, 22, 24, 26, 28}
         level of the mtp model to train
     min_dist: float
-            minimum distance between atoms in the system (unit: Angstrom)
+        minimum distance between atoms in the system (unit: Angstrom)
     max_dist: float
-            cutoff radius for the radial part (unit: Angstrom)
+        cutoff radius for the radial part (unit: Angstrom)
+    radial_basis_size: int, default=8
+            number of basis functions to use for the radial part
+    radial_basis_type: {'RBChebyshev', ???}, default='RBChebyshev'
+        type of basis functions to use for the radial part
     train_set: list, ase.atoms.Atoms 
         list of ase Atoms objects; energy, forces and stresses must have been 
         computed and stored in each Atoms object
@@ -933,7 +938,15 @@ def calc_efs(mlip_bin, mpirun='', confs_path='in.cfg', pot_path='pot.mtp', out_p
         run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)
         
 
-def calc_efs_from_ase(mlip_bin, atoms, mpirun='', pot_path='pot.mtp', cfg_files=False, out_path='./out.cfg', dir='./', write_conf=False, outconf_name=None):
+def calc_efs_from_ase(mlip_bin, 
+                      atoms, 
+                      mpirun='', 
+                      pot_path='pot.mtp', 
+                      cfg_files=False, 
+                      out_path='./out.cfg',
+                      dir='./',
+                      write_conf=False, 
+                      outconf_name=None):
     '''
     Function to calculate energies, forces, and stresses for the configurations in an ASE trajectory with
     pot.mtp, writing the result into the same trajectory (plus out.cfg, if wanted).

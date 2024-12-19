@@ -6,6 +6,8 @@ import sys
 import shutil 
 import numbers
 from pathlib import Path
+import logging
+
 
 def mkdir_warner(dir_path, interactive=False):
     '''Create a directory. If it already exists, the old one will be deleted. If interactive=True, the user will be asked whether to delete or not 
@@ -418,4 +420,138 @@ def ln_s_f(origin, dest):
     else:
         os.system(f'ln -s -f {path1.absolute()} {path2.absolute()}')
         
+        
+
+
+# def setup_logging(tool_name, debug=False,log_file="logger.log"):
+#     """
+#     Set up a logger and exception hook for a tool.
+
+#     Parameters:
+#         tool_name (str): Name of the tool to identify log messages.
+#         debug (bool): activate debug logging
+#         log_file (str): File where logs will be saved.
+#         log_level (int): Logging level (e.g., logging.INFO, logging.DEBUG).
+
+#     Returns:
+#         logger (logging.Logger): Configured logger.
+#         handler (logging.Handler): Console handler for additional customization.
+#     """
     
+#     # Create a logger with the tool's name
+#     logger = logging.getLogger(tool_name)
+#     logger.setLevel(logging.DEBUG)  # Allow all levels; filter in handlers
+
+#     if debug == True:
+#         log_level = logging.DEBUG
+#     else:
+#         log_level = logging.INFO
+        
+#     # Create a file handler for writing logs
+#     file_handler = logging.FileHandler(log_file)
+#     file_handler.setLevel(log_level)  # Default to INFO for file
+#     file_formatter = logging.Formatter('%(message)s')
+#     file_handler.setFormatter(file_formatter)
+
+#     # Create a console handler for interactive output
+#     console_handler = logging.StreamHandler(sys.stdout)
+#     console_handler.setLevel(log_level)  # Default to INFO for console
+#     console_formatter = logging.Formatter('%(message)s')
+#     console_handler.setFormatter(console_formatter)
+
+#     # Add handlers to the logger
+#     logger.addHandler(file_handler)
+#     logger.addHandler(console_handler)
+
+#     # Define a custom exception hook for uncaught exceptions
+#     def handle_exception(exc_type, exc_value, exc_traceback):
+#         if issubclass(exc_type, KeyboardInterrupt):
+#             # Use default behavior for KeyboardInterrupt
+#             sys.__excepthook__(exc_type, exc_value, exc_traceback)
+#             return
+#         logger.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+#     # Set the custom exception hook
+#     sys.excepthook = handle_exception
+
+#     return logger, console_handler
+    
+    
+    
+def setup_logging(logger_name=None, log_file=None, debug=False):
+    """
+    Set up a logger and exception hook for a tool.
+
+    Parameters:
+    -----------
+        logger_name: str
+            Name of the existing logger (if any) to identify log messages. If None, use the root logger.
+        log_file: str
+            File where logs will be saved. If None, no file handler is added.
+        debug: bool
+            activate the debug logging
+
+    Returns:
+        logger: logging.Logger
+            Configured logger.
+            
+    """
+    
+    # If tool_name is None, use the root logger
+    if logger_name:
+        logger = logging.getLogger(tool_name)
+    else:
+        logging.getLogger()
+        logging.propagate = False
+
+    # Avoid duplicate handlers if the logger already has handlers
+    if not logger.handlers:
+        # Set logger level
+        logger.setLevel(logging.DEBUG)
+        
+        log_level = logging.DEBUG if debug == True else logging.INFO
+        
+        # Console handler
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(log_level)
+        console_formatter = logging.Formatter('%(message)s')
+        console_handler.setFormatter(console_formatter)
+        logger.addHandler(console_handler)
+
+        # File handler (if log_file is provided)
+        if log_file:
+            file_handler = logging.FileHandler(log_file)
+            file_handler.setLevel(log_level)
+            file_formatter = logging.Formatter('%(message)s')
+            file_handler.setFormatter(file_formatter)
+            logger.addHandler(file_handler)
+
+        # Define a custom exception hook
+        def handle_exception(exc_type, exc_value, exc_traceback):
+            if issubclass(exc_type, KeyboardInterrupt):
+                sys.__excepthook__(exc_type, exc_value, exc_traceback)
+                return
+            logger.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+        sys.excepthook = handle_exception
+
+    return logger
+
+
+        
+        
+def mute_logger(name="mute_logger"):
+    """
+    Create a logger that discards all log messages.
+
+    Parameters:
+        name (str): The name of the logger.
+
+    Returns:
+        logging.Logger: A logger that doesn't output any messages.
+    """
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)  # Set to the lowest level to allow all messages
+    logger.addHandler(logging.NullHandler())  # Attach a NullHandler to discard messages
+    return logger   
+        

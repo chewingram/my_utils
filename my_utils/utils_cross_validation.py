@@ -1,8 +1,8 @@
 import numpy as np
 import os
 import sys
-from .utils import data_reader, space, path, inv_dict, mae, rmse, R2, cap_first, low_first
-import .utils_mlip as mlp
+from .utils import setup_logging, mute_logger, data_reader, space, path, inv_dict, mae, rmse, R2, cap_first, low_first
+from . import utils_mlip as mlp
 import random as rnd
 from ase.io import read, write
 import shutil
@@ -10,6 +10,10 @@ from matplotlib import pyplot as plt
 import matplotlib
 from subprocess import run
 import subprocess
+from copy import deepcopy as cp
+from pathlib import Path
+from math import ceil
+import logging
 
 def kfold_ind(size, k):
     '''
@@ -35,48 +39,75 @@ def kfold_ind(size, k):
 
 
 
-def cross_validate_kfold(nfolds, mlip_bin, dataset_path, mtp_pot_params, mtp_train_params):
+def cross_validate_kfold(nfolds, mpirun, mlip_bin, dataset, train_flag_params, train_params):
     '''
     Function to launch the cross validation using the k-fold validation. Currently it works with MTP.
     Args:
-    nfolds(int): number of folds
-    mlip_bin(str, path): path to the mlip binary
-    dataset_path(str, path): path to the dataset
-    mtp_pot_params(dict): dictionary with the parameters for the mtp potential file. Example:
-                          dict(sp_count = 2,
-                          maxd = max_dist,
-                          rad_bas_sz = 8,
-                          rad_bas_type = 'RBChebyshev',
-                          lev = 22,
-                          mtps_dir = '/scratch/users/s/l/slongo/codes/mlip-2/untrained_mtps',
-                          out_name = 'init.mtp')
-                          ...see mlp.make_mtp_file() function for more details on the keys. !! the keys 'mind' and 'wdir' are set
-                             in this function, so no need to include them in the dictionary (they will be overwritten anyways).
-    mtp_train_params(dict): dictionary with the parameters for the training. Example:
-                            dict(ene_weight = 1,
-                            for_weight = 5,
-                            str_weight = 5,
-                            bgfs_tol = 1e-3,
-                            max_iter = 1000,
-                            weighting = 'vibrations',
-                            init_par = 'random',
-                            up_mindist = False,
-                            tr_pot_n = 'pot.mtp')
-                        ...see mlp.train_pot() function for more details on the keys.
+    nfolds: int
+        number of folds
+    mpirun: str
+        command for mpi or similar (e.g. 'mpirun')
+    mlip_bin: str, path
+        path to the mlip binary
+    dataset: ase.Atoms
+        dataset as an ASE trajectory
+    train_flag_params: dict
+        dictionary containing the flags to use; these are the possibilities:
+        ene_weight: float, default=1
+            weight of energies in the fitting
+        for_weight: float, default=0.01
+            weight of forces in the fitting
+        str_weight: float, default=0.001 
+            weight of stresses in the fitting
+        sc_b_for: float, default=0
+            if >0 then configurations near equilibrium (with roughtly force < 
+            <double>) get more weight
+        val_cfg: str 
+            filename with configuration to validate
+        max_iter: int, default=1000
+            maximal number of iterations
+        bfgs_tol: float, default=1e-3
+            stop if error dropped by a factor smaller than this over 50 BFGS 
+            iterations
+        weighting: {'vibrations', 'molecules', 'structures'}, default=vibrations 
+            how to weight configuration wtih different sizes relative to each 
+            other
+        init_par: {'random', 'same'}, default='random'
+            how to initialize parameters if a potential was not pre-fitted;
+            - random: random initialization
+            - same: this is when interaction of all species is the same (more 
+                    accurate fit, but longer optimization)
+        skip_preinit: bool 
+            skip the 75 iterations done when parameters are not given
+        up_mindist: bool
+            updating the mindist parameter with actual minimal interatomic 
+            distance in the training set
+    train_params: dict
+        dictionary with the parameters for the training; these are the parameters to set:
+        untrained_pot_file_dir: str 
+            path to the directory containing the untrained mtp init files (.mtp)
+        mtp_level: {2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 21, 22, 24, 26, 28}
+            level of the mtp model to train
+        max_dist: float
+                cutoff radius for the radial part (unit: Angstrom)
+        radial_basis_size: int, default=8
+            number of basis functions to use for the radial part
+        radial_basis_type: {'RBChebyshev', ???}, default='RBChebyshev'
+            type of basis functions to use for the radial part
     
     '''
     # mlpi-2 bin
-    mlip_bin = 'mpirun /scratch/ulg/matnan/slongo/codes/mlip-2/build1/mlp'
+    #mlip_bin = 'mpirun /scratch/ulg/matnan/slongo/codes/mlip-2/build1/mlp'
 
     # seed
     seed = rnd.randint(0, 99999)
     rnd.seed(seed)
 
     # retrieve the data
-    data = read(dataset_path, index=':')
+    #data = read(dataset_path, index=':')
 
-    rnd.shuffle(data)
-    indices = np.array(kfold_ind(size=len(data), k=nfolds)[1])
+    rnd.shuffle(dataset)
+    indices = np.array(kfold_ind(size=len(dataset), k=nfolds)[1])
     res_sum = f'Results of k-fold cross-validation. Seed used to shuffle the dataset: {seed}\n' 
     res_sum += f'#n. fold  \tfold size\trmse eV/at (E){space(6)}\tmae eV/at (E){space(7)}\tR2 (E){space(14)}\t'
     res_sum += f'rmse eV/Angst (F)   \tmae eV/Angst (F)    \tR2 (F){space(14)}\t'
@@ -97,97 +128,294 @@ def cross_validate_kfold(nfolds, mlip_bin, dataset_path, mtp_pot_params, mtp_tra
         else:
             i1 = indices[i-1] + 1 # for all the other folds the lower index is the upper index of the previous fold + 1
         if i == len(indices): # for the last fold the upper index is the length of the dataset - 1
-            i2 = len(data) - 1
+            i2 = len(dataset) - 1
         else:
             i2 = indices[i] # for all the other folds the upper index is the i-th value of the array indeces
-        mask = np.repeat(False, len(data)) # make a mask
+        mask = np.repeat(False, len(dataset)) # make a mask
         mask[i1:i2] = True # true only for the fold (test set)
-        train_set = [x for x, bool in zip(data, mask) if not bool]
-        test_set = [x for x, bool in zip(data, mask) if bool]
+        train_set = [cp(x) for x, bool in zip(dataset, mask) if not bool]
+        test_set = [cp(x) for x, bool in zip(dataset, mask) if bool]
         set_lengths.append(len(test_set))
         #print(f'N. confs. of the train set: {len(train_set)}; test set: {i1}-{i2} (n. confs: {len(test_set)})')
 
         # Now we have train- and test set. We need to train and then test.
 
-        dir = path("tmp/")
-        if os.path.exists(dir):
-            shutil.rmtree(dir)
-        os.makedirs(dir)
+        dir = Path("tmp/")
+        if os.path.exists(dir.absolute()):
+            shutil.rmtree(dir.absolute())
+        dir.mkdir(parents=True, exist_ok=True)
 
 
-        mlp.conv_ase_to_mlip2(train_set, f'{dir}TrainSet.cfg')
-        #write_cfg(f'{dir}TrainSet.cfg', train_set, ['Mo', 'S'])
-        mlp.conv_ase_to_mlip2(test_set, f'{dir}TestSet.cfg')
-        #write_cfg(f'{dir}TestSet.cfg', test_set, ['Mo', 'S'])
+#         mlp.conv_ase_to_mlip2(train_set, f'{dir}TrainSet.cfg')
+#         #write_cfg(f'{dir}TrainSet.cfg', train_set, ['Mo', 'S'])
+#         mlp.conv_ase_to_mlip2(test_set, f'{dir}TestSet.cfg')
+#         #write_cfg(f'{dir}TestSet.cfg', test_set, ['Mo', 'S'])
 
 
          # compute the minimum distance
         min_dist = mlp.find_min_dist(train_set)
-        mtp_pot_params['mind'] = min_dist
         
-        mtp_pot_params['wdir'] = dir
+        trained_pot_name = 'pot.mtp'
 
-        mlp.make_mtp_file(**mtp_pot_params)
-        #shutil.copyfile('init.mtp', f'{dir}init.mtp')
+        train_flag_params['trained_pot_name'] = trained_pot_name
+        if 'cur_pot_n' in train_flag_params.keys(): del train_flag_params['cur_pot_n']
+        train_params['min_dist'] = min_dist
+        train_params['dir'] = dir.absolute()
+        train_params['params'] = train_flag_params
+        train_params['train_set'] = train_set
+        train_params['mlip_bin'] = mlip_bin
+        train_params['mpirun'] = mpirun
+        
+        if 'val_cfg' in train_params.keys(): del train_params['val_cfg']
+            
+        mlp.train_pot_from_ase_tmp(**train_params)
+                                              
+        ml_train_set = mlp.calc_efs_from_ase(mlip_bin = mlip_bin, 
+                                             atoms=train_set, 
+                                             mpirun=train_params['mpirun'], 
+                                             pot_path=dir.joinpath('pot.mtp').absolute(), 
+                                             cfg_files=False, 
+                                             dir=dir.absolute(),
+                                             write_conf=False, 
+                                             outconf_name=None)
+        
+        errs_train = mlp.make_comparison(is_ase1=True,
+                                         is_ase2=True,
+                                         structures1=train_set, 
+                                         structures2=ml_train_set, 
+                                         props='all', 
+                                         make_file=False, 
+                                         dir=dir.absolute(),
+                                         outfile_pref='', 
+                                         units=None)
+        
+        
+        
+        ml_test_set = mlp.calc_efs_from_ase(mlip_bin = train_params['mlip_bin'], 
+                                            atoms=test_set, 
+                                            mpirun=train_params['mpirun'], 
+                                            pot_path=dir.joinpath('pot.mtp').absolute(), 
+                                            cfg_files=False, 
+                                            out_path='./out.cfg',
+                                            dir=dir.absolute(),
+                                            write_conf=False, 
+                                            outconf_name=None)
+                                        
+        errs_test = mlp.make_comparison(is_ase1=True,
+                                         is_ase2=True,
+                                         structures1=test_set, 
+                                         structures2=ml_test_set, 
+                                         props='all', 
+                                         make_file=False, 
+                                         dir=dir.absolute(),
+                                         outfile_pref='', 
+                                         units=None)
+        
+        
+            
+            
+                        
+                        
+                        
+                        
+                        
+        #mtp_pot_params['wdir'] = dir
 
-        # Training phase
-        tmp_params = dict(mlip_bin = mlip_bin,
-                         init_path = f'{dir}init.mtp',
-                         train_set_path = f'{dir}TrainSet.cfg',
-                         dir = dir,
-                         params = mtp_train_params)
+#         mlp.make_mtp_file(**mtp_pot_params)
+#         #shutil.copyfile('init.mtp', f'{dir}init.mtp')
 
-        mlp.train_pot(**tmp_params)
+#         # Training phase
+#         tmp_params = dict(mlip_bin = mlip_bin,
+#                          init_path = f'{dir}init.mtp',
+#                          train_set_path = f'{dir}TrainSet.cfg',
+#                          dir = dir,
+#                          params = mtp_train_params)
+
+#         mlp.train_pot(**tmp_params)
 
         #cmd = f'{mlip_bin} train init.mtp TrainSet.cfg --trained-pot-name=pot.mtp'
         #run(cmd.split(), cwd=dir)
         #os.system(f'cp pot.mtp {dir}')
 
-        # Compute e-f-s on the training set
-        efs_params = dict(mlip_bin = mlip_bin, 
-                          confs_path = f'{dir}TrainSet.cfg', 
-                          pot_path = f'{dir}pot.mtp', 
-                          out_path = f'{dir}ResTrain.cfg',
-                          dir = dir)
-        print(f'Giving to calc_efs: out_path = {efs_params["out_path"]}')
-        mlp.calc_efs(**efs_params)
+#         # Compute e-f-s on the training set
+#         efs_params = dict(mlip_bin = mlip_bin, 
+#                           confs_path = f'{dir}TrainSet.cfg', 
+#                           pot_path = f'{dir}pot.mtp', 
+#                           out_path = f'{dir}ResTrain.cfg',
+#                           dir = dir)
+#         print(f'Giving to calc_efs: out_path = {efs_params["out_path"]}')
+#         mlp.calc_efs(**efs_params)
 
-        #cmd = f'{mlip_bin} calc-efs pot.mtp TrainSet.cfg ResTrain.cfg'
-        #run(cmd.split(), cwd=dir)
+#         #cmd = f'{mlip_bin} calc-efs pot.mtp TrainSet.cfg ResTrain.cfg'
+#         #run(cmd.split(), cwd=dir)
 
 
-        # Compute errors and make comparison files
-        errs_train = mlp.make_comparison(f'{dir}TrainSet.cfg', f'{dir}ResTrain.cfg', make_file=False, dir='./', outfile_pref='MLIP-')
+#         # Compute errors and make comparison files
+#         errs_train = mlp.make_comparison(f'{dir}TrainSet.cfg', f'{dir}ResTrain.cfg', make_file=False, dir='./', outfile_pref='MLIP-')
 
-        # Testing phase (computing e-f-s on the test set)
-        efs_params['confs_path'] = f'{dir}TestSet.cfg'
-        efs_params['out_path'] = f'{dir}ResTest.cfg'
-        mlp.calc_efs(**efs_params)
-        #cmd = f'{mlip_bin} calc-efs pot.mtp TestSet.cfg ResTest.cfg'
-        #run(cmd.split(), cwd=dir)
+#         # Testing phase (computing e-f-s on the test set)
+#         efs_params['confs_path'] = f'{dir}TestSet.cfg'
+#         efs_params['out_path'] = f'{dir}ResTest.cfg'
+#         mlp.calc_efs(**efs_params)
+#         #cmd = f'{mlip_bin} calc-efs pot.mtp TestSet.cfg ResTest.cfg'
+#         #run(cmd.split(), cwd=dir)
 
-        # Compute errors and male comparison files
-        errs_test = mlp.make_comparison(f'{dir}TestSet.cfg', f'{dir}ResTest.cfg', make_file=False, dir='./', outfile_pref='Test-')
+#         # Compute errors and male comparison files
+#         errs_test = mlp.make_comparison(f'{dir}TestSet.cfg', f'{dir}ResTest.cfg', make_file=False, dir='./', outfile_pref='Test-')
 
 
         #for x in [0,1,2]:
         #    plot_correlations(dtset_ind=0, dir=dir, ind=x, offsets=[0.025, 2, 20], save=False)
 
         # Save errors to do the summary of the errors
-        e_rmse.append(errs_test['energy'][0])
-        e_mae.append(errs_test['energy'][1])
-        e_R2.append(errs_test['energy'][2])
-        f_rmse.append(errs_test['forces'][0])
-        f_mae.append(errs_test['forces'][1])
-        f_R2.append(errs_test['forces'][2])
-        s_rmse.append(errs_test['stress'][0])
-        s_mae.append(errs_test['stress'][1])
+        e_rmse.append(errs_test['energy'][0])                
+        e_mae.append(errs_test['energy'][1])                
+        e_R2.append(errs_test['energy'][2])                   
+        f_rmse.append(errs_test['forces'][0])                    
+        f_mae.append(errs_test['forces'][1])                   
+        f_R2.append(errs_test['forces'][2])                   
+        s_rmse.append(errs_test['stress'][0])                    
+        s_mae.append(errs_test['stress'][1])            
         s_R2.append(errs_test['stress'][2])
+        
+
+
+    e_rmse = np.array(e_rmse, dtype='float')
+    e_mae = np.array(e_mae, dtype='float')
+    e_R2 = np.array(e_R2, dtype='float')
+    f_rmse = np.array(f_rmse, dtype='float')
+    f_mae = np.array(f_mae, dtype='float')
+    f_R2 = np.array(f_R2, dtype='float')
+    s_rmse = np.array(s_rmse, dtype='float')
+    s_mae = np.array(s_mae, dtype='float')
+    s_R2 = np.array(s_R2, dtype='float')
 
     # Complete and save the summary of errors
-    res_sum += f'max values\t{space(9)}\t{max(e_rmse):<20.10f}\t{max(e_mae):<20.10f}\t{max(e_R2):<20.10f}\t{max(f_rmse):<20.10f}\t{max(f_mae):<20.10f}\t{max(f_R2):<20.10f}\t{max(s_rmse):<20.10f}\t{max(s_mae):<20.10f}\t{max(s_R2):<20.10f}\n'
     for i in range(len(e_rmse)):
-        res_sum += f"{i+1:<10}\t{set_lengths[i]:<9}\t{e_rmse[i]:<20.10f}\t{e_mae[i]:<20.10f}\t{e_R2[i]:<20.10f}\t{f_rmse[i]:<20.10f}\t{f_mae[i]:<20.10f}\t{f_R2[i]:<20.10f}\t{s_rmse[i]:<20.10f}\t{s_mae[i]:<20.10f}\t{s_R2[i]:<20.10f}\n"
-    res_sum_name = 'res_summary.dat'
-    with open(res_sum_name, 'w') as fl:
+        res_sum += f"{i+1:<10}  {set_lengths[i]:<9}  {e_rmse[i]:<20.10f}  {e_mae[i]:<20.10f}  {e_R2[i]:<20.10f}  {f_rmse[i]:<20.10f}  {f_mae[i]:<20.10f}  {f_R2[i]:<20.10f}  {s_rmse[i]:<20.10f}  {s_mae[i]:<20.10f}  {s_R2[i]:<20.10f}\n"
+    res_sum_name = Path('res_summary.dat')
+    
+    res_sum += f'max values  {space(9)}  {max(e_rmse):<20.10f}  {max(e_mae):<20.10f}  {max(e_R2):<20.10f}  {max(f_rmse):<20.10f}  {max(f_mae):<20.10f}  {max(f_R2):<20.10f}  {max(s_rmse):<20.10f}  {max(s_mae):<20.10f}  {max(s_R2):<20.10f}\n'
+    
+    res_sum += f'min values  {space(9)}  {min(e_rmse):<20.10f}  {min(e_mae):<20.10f}  {min(e_R2):<20.10f}  {min(f_rmse):<20.10f}  {min(f_mae):<20.10f}  {min(f_R2):<20.10f}  {min(s_rmse):<20.10f}  {min(s_mae):<20.10f}  {min(s_R2):<20.10f}\n'
+    
+    res_sum += f'average values  {space(9)}  {e_rmse.mean():<20.10f}  {e_mae.mean():<20.10f}  {e_R2.mean():<20.10f}  {f_rmse.mean():<20.10f}  {f_mae.mean():<20.10f}  {f_R2.mean():<20.10f}  {s_rmse.mean():<20.10f}  {s_mae.mean():<20.10f}  {s_R2.mean():<20.10f}\n'
+    
+    with open(res_sum_name.absolute(), 'w') as fl:
         fl.write(res_sum)
+    
+    return errs_train, errs_test
+
+        
+def check_convergence_kfold(logging=True, logger_name=None, logger_filepath='convergence.log', debug_log=False):
+    '''This function check if a dataset is converged with a specified MTP model.
+    
+    It is assumed that the order in the dataset is the same of the hypotetical convergence, in other words, 
+    the convergence of the potential is checked with respect to the size of the dataset as it increase along
+    the trajectory.
+    Increasing subsets of the dataset are used to train and test the potential according to a k-fold protocol, 
+    where k (nfolds) is kept constant, while the size of the folds increase through the convergence check.
+    
+    Parameters
+    ----------
+    increase_step: int
+        number of structures to increase the dataset by at each iteration of the training; it must be a multiple of nfolds
+    nfolds: int
+        number of folds used in the k-fold crossvalidation protocol  
+    mpirun: str
+        command for mpi or similar (e.g. 'mpirun')
+    mlip_bin: str, path
+        path to the mlip binary
+    dataset: ase.Atoms
+        dataset as an ASE trajectory
+    train_flag_params: dict
+        dictionary containing the flags to use; these are the possibilities:
+        ene_weight: float, default=1
+            weight of energies in the fitting
+        for_weight: float, default=0.01
+            weight of forces in the fitting
+        str_weight: float, default=0.001 
+            weight of stresses in the fitting
+        sc_b_for: float, default=0
+            if >0 then configurations near equilibrium (with roughtly force < 
+            <double>) get more weight
+        val_cfg: str 
+            filename with configuration to validate
+        max_iter: int, default=1000
+            maximal number of iterations
+        bfgs_tol: float, default=1e-3
+            stop if error dropped by a factor smaller than this over 50 BFGS 
+            iterations
+        weighting: {'vibrations', 'molecules', 'structures'}, default=vibrations 
+            how to weight configuration wtih different sizes relative to each 
+            other
+        init_par: {'random', 'same'}, default='random'
+            how to initialize parameters if a potential was not pre-fitted;
+            - random: random initialization
+            - same: this is when interaction of all species is the same (more 
+                    accurate fit, but longer optimization)
+        skip_preinit: bool 
+            skip the 75 iterations done when parameters are not given
+        up_mindist: bool
+            updating the mindist parameter with actual minimal interatomic 
+            distance in the training set
+    train_params: dict
+        dictionary with the parameters for the training; these are the parameters to set:
+        untrained_pot_file_dir: str 
+            path to the directory containing the untrained mtp init files (.mtp)
+        mtp_level: {2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 21, 22, 24, 26, 28}
+            level of the mtp model to train
+        max_dist: float
+                cutoff radius for the radial part (unit: Angstrom)
+        radial_basis_size: int, default=8
+            number of basis functions to use for the radial part
+        radial_basis_type: {'RBChebyshev', ???}, default='RBChebyshev'
+            type of basis functions to use for the radial part
+    logging: bool; default = True
+        activate the logging
+    logger_name: str; default = None
+        name of the logger to use; if a logger with that name already exists (e.g. it was 
+        created by a calling function) it will be used, otherwise a nre one will be created.
+        If the logger_name is None, the root logger will be used.
+    logger_filepath: str; default = 'convergence.log'
+        path to the file that will contain the log. If None and no preexisting file handler is there, 
+        no log file will be created. If an existing logger name is provided and it already has
+        a file handler, this argument will be ignored and the preexisting file handler will be used; if no
+        handler already exists, or a new logger is created, this argument is the filepath of the log file.
+     debug_log: bool;  default = False
+         if a new logger is create (preexisting_logger_name = None), then activate debug logging
+    
+    '''
+    if logging == True:
+        # set logger
+        l1 = setup_logging(logger_name=logger_name, log_file=logger_filepath, debug=debug_log)
+    else:
+        l1 = mute_logger()
+    
+    
+    dtsize = len(dataset)
+    
+    nfolds
+    
+    if increase_step%nfolds != 0:
+        raise ValueError('The increasing step must be a multiple of the number of folds!')
+        
+    n_iters = int((dtsize-min_dtsize)/increasing_step) # number of iteration to run to evaluate convergence
+    offset = (ldtsize-min_dtsize)%increase_step
+    
+    for i in range(n_iters):
+        curr_dataset = dataset[offset+min_dtsize:i*increasing_step+increasing_step]
+        cross_validate_kfold(nfolds, mpirun, mlip_bin, curr_dataset, train_flag_params, train_params)
+        print(''
+        
+
+        
+        
+        
+        
+        
+        
+        
+        
+        
+    
