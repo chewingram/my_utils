@@ -6,6 +6,7 @@ from . import utils_mlip as mlp
 import random as rnd
 from ase.io import read, write
 import shutil
+import pickle as pkl
 from matplotlib import pyplot as plt
 import matplotlib
 from subprocess import run
@@ -39,6 +40,239 @@ def kfold_ind(size, k):
 
 
 
+def plot_convergence_stuff(res, dt_sizes, dir):
+    dir = Path(dir)
+    if not dir.is_dir():
+        dir.mkdir(parents=True)
+    
+    # DATA PROCESSING
+    train_errs_ene = np.array([x[0]['energy'] for x in res]) # shape (n_iterations, n_metrics, n_folds)
+    train_errs_for = np.array([x[0]['forces'] for x in res])
+    train_errs_str = np.array([x[0]['stress'] for x in res])
+
+    test_errs_ene = np.array([x[1]['energy'] for x in res])
+    test_errs_for = np.array([x[1]['forces'] for x in res])
+    test_errs_str = np.array([x[1]['stress'] for x in res])
+
+
+
+    # Error analysis metrics for training
+    train_metrics = {
+        'RMSE': 0,  # Index for RMSE in the third dimension
+        'MAE': 1,   # Index for MAE in the third dimension
+        'R2': 2     # Index for R2 in the third dimension
+    }
+
+    # Initialize dictionaries for average and maximum metrics
+    avg_train_metrics = {}
+    max_train_metrics = {}
+
+    avg_test_metrics = {}
+    max_test_metrics = {}
+
+    # Loop through the metrics and compute averages and maxima
+    for metric_name, metric_idx in train_metrics.items():
+        avg_train_metrics[metric_name] = np.array([
+            train_errs_ene[:, metric_idx, :].mean(axis=1),
+            train_errs_for[:, metric_idx, :].mean(axis=1),
+            train_errs_str[:, metric_idx, :].mean(axis=1),
+        ])
+        if metric_name == 'R2':
+            max_train_metrics[metric_name] = np.array([
+                train_errs_ene[:, metric_idx, :].min(axis=1),
+                train_errs_for[:, metric_idx, :].min(axis=1),
+                train_errs_str[:, metric_idx, :].min(axis=1),
+            ])
+
+            max_test_metrics[metric_name] = np.array([
+                test_errs_ene[:, metric_idx, :].min(axis=1),
+                test_errs_for[:, metric_idx, :].min(axis=1),
+                test_errs_str[:, metric_idx, :].min(axis=1),
+            ])
+        else:
+            max_train_metrics[metric_name] = np.array([
+                train_errs_ene[:, metric_idx, :].max(axis=1),
+                train_errs_for[:, metric_idx, :].max(axis=1),
+                train_errs_str[:, metric_idx, :].max(axis=1),
+            ])
+
+            max_test_metrics[metric_name] = np.array([
+                test_errs_ene[:, metric_idx, :].max(axis=1),
+                test_errs_for[:, metric_idx, :].max(axis=1),
+                test_errs_str[:, metric_idx, :].max(axis=1),
+            ])
+
+        avg_test_metrics[metric_name] = np.array([
+            test_errs_ene[:, metric_idx, :].mean(axis=1),
+            test_errs_for[:, metric_idx, :].mean(axis=1),
+            test_errs_str[:, metric_idx, :].mean(axis=1),
+        ])
+        
+    ### ACTUAL PLOTTING
+    
+    #### RMSE
+    # plot avg RMSE
+    y_e = avg_test_metrics['RMSE'][0]
+    y_f = avg_test_metrics['RMSE'][1]
+    y_s = avg_test_metrics['RMSE'][2]
+
+    fig_avg_rmse, ax1 = plt.subplots(3, 1, figsize=(10, 10) )
+    fig_avg_rmse.suptitle('Average RMSE (over the k-fold crossvalidation iterations)')
+
+    ax1[0].set_xlabel('Size of the dataset')
+    ax1[0].set_ylabel('Energy RMSE (eV/at)')
+    ax1[0].plot(dt_sizes, y_e, label='Energy RMSE', ls='-', marker='o', color='blue')
+
+    ax1[1].set_xlabel('Size of the dataset')
+    ax1[1].set_ylabel('Forces RMSE (ev/Angs)')
+    ax1[1].plot(dt_sizes, y_f, label='Forces RMSE', ls='-', marker='o', color='red')
+
+
+    ax1[2].set_xlabel('Size of the dataset')
+    ax1[2].set_ylabel('Stress RMSE (GPa)')
+    ax1[2].plot(dt_sizes, y_s, label='Stress RMSE', ls='-', marker='o', color='green')
+
+    fig_avg_rmse.patch.set_linewidth(1)
+    fig_avg_rmse.patch.set_edgecolor('black')
+
+
+    # plot max RMSE
+    y_e = max_test_metrics['RMSE'][0]
+    y_f = max_test_metrics['RMSE'][1]
+    y_s = max_test_metrics['RMSE'][2]
+
+
+    fig_max_rmse, ax2 = plt.subplots(3, 1, figsize=(10, 10) )
+    fig_max_rmse.suptitle('Maximum RMSE (over the k-fold crossvalidation iterations)')
+
+    ax2[0].set_xlabel('Size of the dataset')
+    ax2[0].set_ylabel('Energy RMSE (eV/at)')
+    ax2[0].plot(dt_sizes, y_e, label='Energy RMSE', ls='-', marker='o', color='blue')
+
+    ax2[1].set_xlabel('Size of the dataset')
+    ax2[1].set_ylabel('Forces RMSE (ev/Angs)')
+    ax2[1].plot(dt_sizes, y_f, label='Forces RMSE', ls='-', marker='o', color='red')
+
+
+    ax2[2].set_xlabel('Size of the dataset')
+    ax2[2].set_ylabel('Stress RMSE (GPa)')
+    ax2[2].plot(dt_sizes, y_s, label='Stress RMSE', ls='-', marker='o', color='green')
+
+    fig_max_rmse.patch.set_linewidth(1)
+    fig_max_rmse.patch.set_edgecolor('black')
+    
+    
+    #### MAE
+    # plot avg MAE
+    y_e = avg_test_metrics['MAE'][0]
+    y_f = avg_test_metrics['MAE'][1]
+    y_s = avg_test_metrics['MAE'][2]
+
+    fig_avg_mae, ax1 = plt.subplots(3, 1, figsize=(10, 10) )
+    fig_avg_mae.suptitle('Average MAE (over the k-fold crossvalidation iterations)')
+
+    ax1[0].set_xlabel('Size of the dataset')
+    ax1[0].set_ylabel('Energy MAE (eV/at)')
+    ax1[0].plot(dt_sizes, y_e, label='Energy MAE', ls='-', marker='o', color='blue')
+
+    ax1[1].set_xlabel('Size of the dataset')
+    ax1[1].set_ylabel('Forces MAE (ev/Angs)')
+    ax1[1].plot(dt_sizes, y_f, label='Forces MAE', ls='-', marker='o', color='red')
+
+
+    ax1[2].set_xlabel('Size of the dataset')
+    ax1[2].set_ylabel('Stress MAE (GPa)')
+    ax1[2].plot(dt_sizes, y_s, label='Stress MAE', ls='-', marker='o', color='green')
+
+    fig_avg_mae.patch.set_linewidth(1)
+    fig_avg_mae.patch.set_edgecolor('black')
+
+
+    # plot max MAE
+    y_e = max_test_metrics['MAE'][0]
+    y_f = max_test_metrics['MAE'][1]
+    y_s = max_test_metrics['MAE'][2]
+
+
+    fig_max_mae, ax2 = plt.subplots(3, 1, figsize=(10, 10) )
+    fig_max_mae.suptitle('Maximum MAE (over the k-fold crossvalidation iterations)')
+
+    ax2[0].set_xlabel('Size of the dataset')
+    ax2[0].set_ylabel('Energy MAE (eV/at)')
+    ax2[0].plot(dt_sizes, y_e, label='Energy MAE', ls='-', marker='o', color='blue')
+
+    ax2[1].set_xlabel('Size of the dataset')
+    ax2[1].set_ylabel('Forces MAE (ev/Angs)')
+    ax2[1].plot(dt_sizes, y_f, label='Forces MAE', ls='-', marker='o', color='red')
+
+
+    ax2[2].set_xlabel('Size of the dataset')
+    ax2[2].set_ylabel('Stress MAE (GPa)')
+    ax2[2].plot(dt_sizes, y_s, label='Stress MAE', ls='-', marker='o', color='green')
+
+    fig_max_mae.patch.set_linewidth(1)
+    fig_max_mae.patch.set_edgecolor('black')
+    
+    
+    #### R2
+    # plot avg R2
+    y_e = avg_test_metrics['R2'][0]
+    y_f = avg_test_metrics['R2'][1]
+    y_s = avg_test_metrics['R2'][2]
+
+    fig_avg_R2, ax1 = plt.subplots(3, 1, figsize=(10, 10) )
+    fig_avg_R2.suptitle('Average R$^2$ (over the k-fold crossvalidation iterations)')
+
+    ax1[0].set_xlabel('Size of the dataset')
+    ax1[0].set_ylabel('Energy R$^2$')
+    ax1[0].plot(dt_sizes, y_e, label='Energy R2', ls='-', marker='o', color='blue')
+
+    ax1[1].set_xlabel('Size of the dataset')
+    ax1[1].set_ylabel('Forces R$^2$')
+    ax1[1].plot(dt_sizes, y_f, label='Forces R$^2$', ls='-', marker='o', color='red')
+
+
+    ax1[2].set_xlabel('Size of the dataset')
+    ax1[2].set_ylabel('Stress R$^2$')
+    ax1[2].plot(dt_sizes, y_s, label='Stress R$^2$', ls='-', marker='o', color='green')
+
+    fig_avg_R2.patch.set_linewidth(1)
+    fig_avg_R2.patch.set_edgecolor('black')
+
+
+    # plot min R2
+    y_e = max_test_metrics['R2'][0]
+    y_f = max_test_metrics['R2'][1]
+    y_s = max_test_metrics['R2'][2]
+
+
+    fig_min_R2, ax2 = plt.subplots(3, 1, figsize=(10, 10) )
+    fig_min_R2.suptitle('Minimum R$^2$ (over the k-fold crossvalidation iterations)')
+
+    ax2[0].set_xlabel('Size of the dataset')
+    ax2[0].set_ylabel('Energy R$^2$')
+    ax2[0].plot(dt_sizes, y_e, label='Energy R$^2$', ls='-', marker='o', color='blue')
+
+    ax2[1].set_xlabel('Size of the dataset')
+    ax2[1].set_ylabel('Forces R$^2$')
+    ax2[1].plot(dt_sizes, y_f, label='Forces R$^2$', ls='-', marker='o', color='red')
+
+
+    ax2[2].set_xlabel('Size of the dataset')
+    ax2[2].set_ylabel('Stress R$^2$')
+    ax2[2].plot(dt_sizes, y_s, label='Stress R$^2$', ls='-', marker='o', color='green')
+
+    fig_min_R2.patch.set_linewidth(1)
+    fig_min_R2.patch.set_edgecolor('black')
+
+
+    fig_avg_rmse.savefig(bbox_inches='tight', dpi=600, format='png', fname=dir.joinpath('avg_rmse.png').resolve())
+    fig_max_rmse.savefig(bbox_inches='tight', dpi=600, format='png', fname=dir.joinpath('max_rmse.png').resolve())
+    fig_avg_mae.savefig(bbox_inches='tight', dpi=600, format='png', fname=dir.joinpath('avg_mae.png').resolve())
+    fig_max_mae.savefig(bbox_inches='tight', dpi=600, format='png', fname=dir.joinpath('max_mae.png').resolve())
+    fig_avg_R2.savefig(bbox_inches='tight', dpi=600, format='png', fname=dir.joinpath('avg_R2.png').resolve())
+    fig_min_R2.savefig(bbox_inches='tight', dpi=600, format='png', fname=dir.joinpath('min_R2.png').resolve())
+    
 
 def cross_validate_kfold(nfolds,
                          mpirun,
@@ -117,6 +351,15 @@ def cross_validate_kfold(nfolds,
         handler already exists, or a new logger is created, this argument is the filepath of the log file.
      debug_log: bool;  default = False
          if a new logger is create (preexisting_logger_name = None), then activate debug logging
+     
+     Returns
+     -------
+     errs_train: list of dict
+         list containing the errors on the training set for each fold-iteration; for a given fold-iteration,
+         the dictionary keys are the names of the properties {'energy', 'stress', 'forces'}, while the values
+         are lists [rmse, mae, R2] for each property.
+     errs_test: dict
+         same thing as errs_train, but for the test set.
     
     '''
     
@@ -135,7 +378,7 @@ def cross_validate_kfold(nfolds,
     rnd.seed(seed)
     
     l1.info(f'Shuffling the dataset with seed = {seed}') 
-
+    dataset = cp(dataset)
     rnd.shuffle(dataset)
     indices = np.array(kfold_ind(size=len(dataset), k=nfolds)[1])
     res_sum = f'Results of k-fold cross-validation. Seed used to shuffle the dataset: {seed}\n' 
@@ -143,6 +386,17 @@ def cross_validate_kfold(nfolds,
     res_header += f'{space(0)}rmse eV/Angst (F)  {space(1)}mae eV/Angst (F)  {space(11)}R2 (F)  '
     res_header += f'{space(5)}rmse GPa (S)  {space(6)}mae GPa (S)  {space(11)}R2 (S)\n'
     res_sum += res_header
+    
+    tr_e_rmse = []
+    tr_e_mae = []
+    tr_e_R2 = []
+    tr_f_rmse = []
+    tr_f_mae = []
+    tr_f_R2 = []
+    tr_s_rmse = []
+    tr_s_mae = []
+    tr_s_R2 = []
+    
     e_rmse = []
     e_mae = []
     e_R2 = []
@@ -152,6 +406,7 @@ def cross_validate_kfold(nfolds,
     s_rmse = []
     s_mae = []
     s_R2 = []
+    
     set_lengths = []
     
     l1.info(f'{len(indices) + 1} folds will be defined')
@@ -175,7 +430,7 @@ def cross_validate_kfold(nfolds,
 
         # Now we have train- and test set. We need to train and then test.
 
-        dir = Path("tmp/")
+        dir = Path(f"tmp/iter_{i}")
         if os.path.exists(dir.absolute()):
             shutil.rmtree(dir.absolute())
         dir.mkdir(parents=True, exist_ok=True)
@@ -251,6 +506,17 @@ def cross_validate_kfold(nfolds,
         l1.info('  ' + res_header)
         
         # Save errors to do the summary of the errors
+        
+        tr_e_rmse.append(errs_train['energy'][0])                
+        tr_e_mae.append(errs_train['energy'][1])                
+        tr_e_R2.append(errs_train['energy'][2])                   
+        tr_f_rmse.append(errs_train['forces'][0])                    
+        tr_f_mae.append(errs_train['forces'][1])                   
+        tr_f_R2.append(errs_train['forces'][2])                   
+        tr_s_rmse.append(errs_train['stress'][0])                    
+        tr_s_mae.append(errs_train['stress'][1])            
+        tr_s_R2.append(errs_train['stress'][2])
+        
         e_rmse.append(errs_test['energy'][0])                
         e_mae.append(errs_test['energy'][1])                
         e_R2.append(errs_test['energy'][2])                   
@@ -271,6 +537,17 @@ def cross_validate_kfold(nfolds,
         l1.info(f'  Current fold done')
         
         res_sum += f'\n'
+        
+        
+    tr_e_rmse = np.array(tr_e_rmse, dtype='float')
+    tr_e_mae = np.array(tr_e_mae, dtype='float')
+    tr_e_R2 = np.array(tr_e_R2, dtype='float')
+    tr_f_rmse = np.array(tr_f_rmse, dtype='float')
+    tr_f_mae = np.array(tr_f_mae, dtype='float')
+    tr_f_R2 = np.array(tr_f_R2, dtype='float')
+    tr_s_rmse = np.array(tr_s_rmse, dtype='float')
+    tr_s_mae = np.array(tr_s_mae, dtype='float')
+    tr_s_R2 = np.array(tr_s_R2, dtype='float')
     
     e_rmse = np.array(e_rmse, dtype='float')
     e_mae = np.array(e_mae, dtype='float')
@@ -316,17 +593,42 @@ def cross_validate_kfold(nfolds,
     with open(res_sum_name.absolute(), 'w') as fl:
         fl.write(res_sum)
     
-    return errs_train, errs_test
+    train_res = {}
+    train_res['energy'] = np.array([tr_e_rmse, tr_e_mae, tr_e_R2])
+    train_res['forces'] = np.array([tr_f_rmse, tr_f_mae, tr_f_R2])
+    train_res['stress'] = np.array([tr_s_rmse, tr_s_mae, tr_s_R2])
+    
+    test_res = {}
+    test_res['energy'] = np.array([e_rmse, e_mae, e_R2])
+    test_res['forces'] = np.array([f_rmse, f_mae, f_R2])
+    test_res['stress'] = np.array([s_rmse, s_mae, s_R2])
+    
+    var_to_return = [train_res, test_res]
+    
+    # shape of var_to_return: n_set_types, n_properties, n_metrics, n_folds
+    # These are the dimensions: 1-[training set, test set]; 2-dict['energy', 'forces', 'stress']; 3-[rmse, mae, r2]; 4-fold
+    return var_to_return
 
         
-def check_convergence_kfold(logging=True, logger_name=None, logger_filepath='convergence.log', debug_log=False):
-    '''This function check if a dataset is converged with a specified MTP model.
+def check_convergence_kfold(increase_step,
+                            nfolds,
+                            min_dtsize=1,
+                            mpirun='',
+                            mlip_bin='mlp', 
+                            dataset=None, 
+                            train_flag_params=None,
+                            train_params=None, 
+                            logging=True, 
+                            logger_name=None,
+                            logger_filepath='convergence.log', 
+                            debug_log=False):
+    '''This function checks if a dataset is converged with a specified MTP model.
     
     It is assumed that the order in the dataset is the same of the hypotetical convergence, in other words, 
-    the convergence of the potential is checked with respect to the size of the dataset as it increase along
+    the convergence of the potential is checked with respect to the size of the dataset as it increases along
     the trajectory.
     Increasing subsets of the dataset are used to train and test the potential according to a k-fold protocol, 
-    where k (nfolds) is kept constant, while the size of the folds increase through the convergence check.
+    where k (nfolds) is kept constant, while the size of the folds increases through the convergence check.
     
     Parameters
     ----------
@@ -334,6 +636,8 @@ def check_convergence_kfold(logging=True, logger_name=None, logger_filepath='con
         number of structures to increase the dataset by at each iteration of the training; it must be a multiple of nfolds
     nfolds: int
         number of folds used in the k-fold crossvalidation protocol  
+    min_dtsize: int
+        minimum size of the initial (smallest) dataset used
     mpirun: str
         command for mpi or similar (e.g. 'mpirun')
     mlip_bin: str, path
@@ -387,7 +691,7 @@ def check_convergence_kfold(logging=True, logger_name=None, logger_filepath='con
         activate the logging
     logger_name: str; default = None
         name of the logger to use; if a logger with that name already exists (e.g. it was 
-        created by a calling function) it will be used, otherwise a nre one will be created.
+        created by a calling function) it will be used, otherwise a new one will be created.
         If the logger_name is None, the root logger will be used.
     logger_filepath: str; default = 'convergence.log'
         path to the file that will contain the log. If None and no preexisting file handler is there, 
@@ -395,9 +699,10 @@ def check_convergence_kfold(logging=True, logger_name=None, logger_filepath='con
         a file handler, this argument will be ignored and the preexisting file handler will be used; if no
         handler already exists, or a new logger is created, this argument is the filepath of the log file.
      debug_log: bool;  default = False
-         if a new logger is create (preexisting_logger_name = None), then activate debug logging
+         if a new logger is created (preexisting_logger_name = None), then activate debug logging
     
     '''
+    
     if logging == True:
         # set logger
         l1 = setup_logging(logger_name=logger_name, log_file=logger_filepath, debug=debug_log)
@@ -408,28 +713,58 @@ def check_convergence_kfold(logging=True, logger_name=None, logger_filepath='con
     l1.info('Evaluation of the convergence of dataset started at ' + datetime.datetime.now().strftime("%d %b %Y - %H:%M:%S"))
     dtsize = len(dataset)
     
-    nfolds
+    res = []
+    dt_sizes = []
     
+    if min_dtsize < 1:
+        raise ValueError('min_dtsize must be greater than 0!')
     if increase_step%nfolds != 0:
         raise ValueError('The increasing step must be a multiple of the number of folds!')
+    if dataset == None:
+        raise ValueError('You must provide a dataset!')
+    if train_flag_params == None:
+        raise ValueError('You must provide the training flag paramters!')
+    if train_params == None:
+        raise ValueError('You must provide the training parameters!')
         
-    n_iters = int((dtsize-min_dtsize)/increasing_step) # number of iterations to run to evaluate convergence
-    offset = (ldtsize-min_dtsize)%increase_step
+    n_iters = int((dtsize-min_dtsize+1)/increase_step) # number of iterations to run to evaluate convergence
+    offset = (dtsize-min_dtsize+1)%increase_step
     
     l1.info(f'{n_iters} crossvalidations ({nfolds}-fold) will be launched')
     l1.info(f'The dataset has {dtsize} elements. Now small datasets will be used by increasing their size by {increase_step}.')
     if offset == 0:
         l1.info(f'The mimimum size is {min_dtsize}')
     else:
-        msg = f'The minimum size is {min_dtsize}, but we need to remove the first {offset} configuration to make the size'
+        msg = f'The minimum size is {min_dtsize}, but we need to include the first {offset} configuration to make the size'
         msg =+ f' of the dataset a multiple of the increasing step.'
         l1.info(msg)
     
     
     for i in range(n_iters):
-        l1.info('Launching the crossvalidation with structures from n. {offset+min_dtsize+1} to n. {(1+)i*increasing_step}')
-        curr_dataset = dataset[offset+min_dtsize:i*increasing_step+increasing_step]
-        res.append(cross_validate_kfold(nfolds, mpirun, mlip_bin, curr_dataset, train_flag_params, train_params))
-        l1.info('Crossvalidation done')
+        msg = f'Launching the crossvalidation with structures from n. 0 to n. {offset+min_dtsize-1 + i*increase_step}'
+        msg += f' (interation n. {i+1})'
+        l1.info(msg)
         
+        curr_dataset = dataset[:offset+min_dtsize-1 + i*increase_step +1]
+        
+        res.append(cross_validate_kfold(nfolds, 
+                                        mpirun,
+                                        mlip_bin, 
+                                        curr_dataset,
+                                        train_flag_params, 
+                                        train_params, 
+                                        logging=True,
+                                        logger_name=l1.name))
+        dt_sizes.append(len(curr_dataset))
+        l1.info('Crossvalidation done\n')
+        
+    # res shape: (n_iteration, n_set_types, n_properties, n_metrics, n_folds)
+    # These are the dimensions:
+    # 1-iteration; 2-[training set, test set]; 3-dict['energy', 'forces', 'stress']; 4-[rmse, mae, r2]; 5-fold
+   
     
+    with open('kfold_convergence_results.pkl', 'wb') as fl:
+        expl = "This file contains three elements: this explanatory variable, dt_sizes and res. dt_sizes is a list with the size of the total datasets used in each crossvalidation. The latter contains for each iteration two elements: errs_train and errs_test as they are output by mlp.make_comparison. \nThe variable res shape: (n_iteration, n_set_types, n_properties, n_metrics, n_folds), and these are the dimensions:\n1-iteration; 2-[training set, test set]; 3-dict['energy', 'forces', 'stress']; 4-[rmse, mae, r2]; 5-fold"
+        pkl.dump([expl, dt_sizes, res], fl)
+        
+    plot_convergence_stuff(res, dt_sizes, dir='Convergence_figures/')
