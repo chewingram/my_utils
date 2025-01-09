@@ -562,3 +562,66 @@ def make_md(mode='interactive', fpath=None):
     
             
 
+def time_convergence_npt(traj, mult_mat=np.eye(3), units=['$\AA$', 'fs']):
+    '''Given an NPT trajectory, the convergence of the thermalized unitcell parameters with time is checked
+    
+    Prameters
+    ---------
+    traj: ASE.Atoms object
+        Trajectory to analyze
+    mult_mat: numpy array; default= identity
+        3x3 matrix used to go from the unitcell to the supercell; the trajectory is supposed to contain 
+        the supercells and the inverse of mult_mat will be used to get back to the unitcell (U = P^(-1)S)
+    units: list of two strings; default= ['$\AA$', 'fs']
+        units of the parameters and time
+    '''
+    
+    n_structs = len(traj)
+    cells = np.zeros((n_structs, 3, 3))
+    for i in range(n_structs):
+        cells[i] += np.array([x.get_cell() x in traj[:i+1]]).mean(axis=0)
+    B = np.linalg.inv(mult_mat)
+    ucells = np.array([make_supercell(x, B) for x in cells])
+
+    a = np.linalg.norm(cells[:, 0], axis=1)
+    b = np.linalg.norm(cells[:, 1], axis=1)
+    c = np.linalg.norm(cells[:, 2], axis=1)
+    # PLOT
+    
+    # a, b, c, a/b, a/c and b/c 
+    
+    fig, ax1 = plt.subplots(3, 2, figsize=(10, 15) )
+    
+    ax1[0].plot(a)
+    ax1[0].ylabel(f'a ({units[0]})')
+    ax1[0].xlabel(f'Time ({units[1]})')
+    
+    ax1[1].plot(b)
+    ax1[1].ylabel(f'b ({units[0]})')
+    ax1[1].xlabel(f'Time ({units[1]})')
+    
+    ax1[2].plot(c)
+    ax1[2].ylabel(f'c ({units[0]})')
+    ax1[2].xlabel(f'Time ({units[1]})')
+    
+    ax1[3].plot(a/b)
+    ax1[3].ylabel(f'a/b ')
+    ax1[3].xlabel(f'Time ({units[1]})')
+    
+    ax1[4].plot(a/c)
+    ax1[4].ylabel(f'a/c ')
+    ax1[4].xlabel(f'Time ({units[1]})')
+    
+    ax1[5].plot(b/c)
+    ax1[5].ylabel(f'b/c ')
+    ax1[5].xlabel(f'Time ({units[1]})')
+    
+    fig.set_suptitle('Cell parameters for the thermalized unitcell vs. time of simulation')
+    
+    
+    
+    
+    
+    
+    
+    

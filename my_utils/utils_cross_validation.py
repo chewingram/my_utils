@@ -727,8 +727,8 @@ def check_convergence_kfold(increase_step,
     if train_params == None:
         raise ValueError('You must provide the training parameters!')
         
-    n_iters = int((dtsize-min_dtsize+1)/increase_step) # number of iterations to run to evaluate convergence
-    offset = (dtsize-min_dtsize+1)%increase_step
+    n_iters = int((dtsize-min_dtsize)/increase_step) + 1 # number of iterations to run to evaluate convergence
+    offset = (dtsize-min_dtsize)%increase_step
     
     l1.info(f'{n_iters} crossvalidations ({nfolds}-fold) will be launched')
     l1.info(f'The dataset has {dtsize} elements. Now small datasets will be used by increasing their size by {increase_step}.')
@@ -736,7 +736,7 @@ def check_convergence_kfold(increase_step,
         l1.info(f'The mimimum size is {min_dtsize}')
     else:
         msg = f'The minimum size is {min_dtsize}, but we need to include the first {offset} configuration to make the size'
-        msg =+ f' of the dataset a multiple of the increasing step.'
+        msg += f' of the dataset a multiple of the increasing step.'
         l1.info(msg)
     
     
