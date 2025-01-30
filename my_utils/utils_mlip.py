@@ -506,7 +506,8 @@ def make_comparison(is_ase1=True,
 
     assert len(ext1) == len(ext2), f"You gave a different number of "\
         + f"true and ML structures!"
-        
+
+    dir = Path(dir)
     # Compute errors and write data on files
     errs = dict()
     for prop in props:

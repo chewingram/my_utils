@@ -99,18 +99,4 @@ def create_abinit_input(input_params=dict(), pseudos_dir='./', pseudos_format='c
                 fl.writelines(lines)
 
 def from_abinit_to_ase(abopath):
-    with open(abopath) as fl:
-        res = read_abinit_out(fl)
-        forces.append(res["forces"])
-        energies.append(res["energy"])
-        stresses.append(res["stress"])
-    # Create the trajectory
-        # Import the Atom object
-    confs.append((read(filepath, index=":")[0]))
-
-        # Prepare the calculator
-    calcs.append(SinglePointCalculator(confs[i], energy=energies[i], forces=forces[i], stress=stresses[i]))
-        # Set the calculator for the Atom object
-    confs[i].calc = calcs[i]
-
 	    

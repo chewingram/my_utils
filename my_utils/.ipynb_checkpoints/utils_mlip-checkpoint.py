@@ -2,8 +2,10 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 import numpy as np
-
+from pathlib import Path
 import os
+import argparse
+from copy import deepcopy as cp
 
 import sys
 
@@ -11,8 +13,10 @@ from .utils import data_reader, cap_first, repeat, warn, from_list_to_text, mae,
 from .Graphics_matplotlib import Histogram
 
 
+
 from ase.io import read, write
 from ase import Atoms
+import ase.atoms
 from ase.calculators.singlepoint import SinglePointCalculator
 
 from numbers import Number
@@ -29,18 +33,20 @@ def plot_correlations(dtset_ind, ind, dir='', offsets=None, save=False):
     ind (int): 0 for energy, 1 for forces, 2 for stress
     dir (str): path of the directory where the comparison files are
     '''
+    if dir is not None:
+        dir = Path(dir)
     dtset_used = ['Test', 'MLIP'] # MLIP corresponds to using the training set
     #dtset_ind = 0
     # order: 0=energy, 1=forces, 2=stress
     names = ['energy', 'forces', 'stress']
     units = ['eV/at', 'ev/$\mathrm{\AA}$', 'GPa']
-    file_names = [f'{dir}{dtset_used[dtset_ind]}-{cap_first(x)}_comparison.dat' for x in names]
+    file_names = [dir.joinpath(f'{dtset_used[dtset_ind]}-{cap_first(x)}_comparison.dat') for x in names]
     if offsets is None:
         #offsets = [35, 1.8, 1] # negative offset of the y position of the text box 
         offsets = [0, 0, 0]
     #ind = 1
 
-    data = data_reader(file_names[ind], separator="", skip_lines=0, frmt="str")
+    data = data_reader(file_names[ind].absolute(), separator="", skip_lines=0, frmt="str")
 
     rmse = data[0][2] 
     mae = data[0][5]
@@ -71,9 +77,10 @@ def plot_correlations(dtset_ind, ind, dir='', offsets=None, save=False):
     fname = f"{dtset_used[dtset_ind]}-{cap_first(names[ind])}"
     ax.set_title(fname)
     if save == True:
-        os.system('mkdir -p Figures')
-        plt.savefig('Figures/' + fname + ".png", format='png', dpi=600, bbox_inches='tight')
-        plt.savefig('Figures/' + fname + '.svg', format='svg')
+        fig_dir = Path('Figures')
+        fig_dir.mkdir(parents=True, exist_ok=True)
+        plt.savefig(fig_dir.joinpath(f'{fname}.png').absolute(), format='png', dpi=600, bbox_inches='tight')
+        plt.savefig(fig_dir.joinpath(f'{fname}.svg').absolute(), format='svg')
 
         
 
@@ -86,6 +93,7 @@ def conv_ase_to_mlip2(atoms, out_path, props=True):
     props(bool): if True energy, stress and forces will be copied too (they must have been computed for each configuration in
                  in the trajectory!); if False no property will be copied.
     '''
+    out_path = Path(out_path)
     if isinstance(atoms, Atoms):
         atoms = [atoms]
         
@@ -141,9 +149,9 @@ def conv_ase_to_mlip2(atoms, out_path, props=True):
             text += f'{-stress[0]:15.20f}\t{-stress[1]:15.20f}\t{-stress[2]:15.20f}\t{-stress[3]:15.20f}\t{-stress[4]:15.20f}'\
                   + f'\t{-stress[5]:15.20f}\n'
         text += f'END_CFG\n\n'
-    with open(out_path, 'w') as fl:
+    with open(out_path.absolute(), 'w') as fl:
         fl.write(text)
-    print(f'File printed to {out_path}')
+    #print(f'File printed to {out_path}')
 
 
 
@@ -156,8 +164,13 @@ def check_sets(bins, trainset_name='TrainSet.traj', testset_name='TestSet.traj',
     testset_name(str): path to the test set
     save(bool): save the figures
     '''
-    train = read(trainset_name, index=":")
-    test = read(testset_name, index=":")
+    if trainset_name is not None:
+        trainset_name = Path(trainset_name)
+    if testset_name is not None:
+        testset_name = Path(testset_name)
+   
+    train = read(trainset_name.absolute(), index=":")
+    test = read(testset_name.absolute(), index=":")
 
     t_train = [x.get_temperature() for x in train]
     t_test = [x.get_temperature() for x in test]
@@ -166,12 +179,12 @@ def check_sets(bins, trainset_name='TrainSet.traj', testset_name='TestSet.traj',
     hist_train = Histogram(t_train)
     hist_train.histofy(mode='n_bins', nbins=len(binses), bins=binses, normalized=True)
     hist_train.make_bars(plot=False)
-    hist_train.plot_bars(save=save, fname='Train_sets.png', format='png', dpi=600, bbox_inches='tight')
+    hist_train.plot_bars(save=save, fname=Path('Train_sets.png').absolute(), format='png', dpi=600, bbox_inches='tight')
 
     hist_test = Histogram(t_test)
     hist_test.histofy(mode='custom_centers', bins=binses, normalized=True)
     hist_test.make_bars(plot=False)
-    hist_test.plot_bars(save=save, fname='Test_sets.png', format='png', dpi=600, bbox_inches='tight')
+    hist_test.plot_bars(save=save, fname=Path('Test_sets.png').absolute(), format='png', dpi=600, bbox_inches='tight')
 
     
     
@@ -192,22 +205,17 @@ def make_mtp_file(sp_count, mind, maxd, rad_bas_sz, rad_bas_type='RBChebyshev', 
     out_name(str): name of the .mtp file (must include extension) (only name, no path)
     '''
     
-    if mtps_dir == None:
-        mtps_dir = '/scratch/ulg/matnan/slongo/codes/mlip-2/untrained_mtps'
-    
-    mtps_dir = os.path.abspath(mtps_dir)
-    if not mtps_dir.endswith('/'):
-        mtps_dir += '/'
-    
-    wdir = os.path.abspath(wdir)
-    if not wdir.endswith('/'):
-        wdir += '/'
+    if mtps_dir is None:
+        mtps_dir = Path('./')
         
+    if wdir is not None:
+        wdir = Path(wdir)
+
     lev = int(lev)
     src_name = f'{lev:0>2d}.mtp'
-    src_path = f'{mtps_dir}{src_name}'
+    src_path = mtps_dir.joinpath(src_name)
     
-    with open(src_path, 'r') as fl:
+    with open(src_path.absolute(), 'r') as fl:
         lines = fl.readlines()
         
     for i, line in enumerate(lines):
@@ -221,9 +229,9 @@ def make_mtp_file(sp_count, mind, maxd, rad_bas_sz, rad_bas_type='RBChebyshev', 
             lines[i] = f'\tmax_dist = {maxd}\n'
         elif 'radial_basis_size' in line:
             lines[i] = f'\tradial_basis_size = {rad_bas_sz}\n'
-    outfile_path = f'{wdir}{out_name}'
+    outfile_path = wdir.joinpath(out_name)
     text = from_list_to_text(lines)
-    with open(outfile_path, 'w') as fl:
+    with open(outfile_path.absolute(), 'w') as fl:
         fl.write(text)
 
 def extract_prop(structures=None, filepath=None):
@@ -257,17 +265,21 @@ def extract_prop(structures=None, filepath=None):
     
     '''
     
+    if filepath is not None:
+        filepath = Path(filepath)
     assert any([structures != None, filepath != None]), f"Either structure or filepath must be given!"
     assert not all([structures != None, filepath != None]), f"Either structure or filepath can be given!"
     if structures != None:
-        if isinstance(structures, ase.atoms.Atoms()):
+        if isinstance(structures, Atoms):
             structures = [structures]
         elif isinstance(structures, list):
-            assert all([isinstance(x) for x in structures]), \
+            assert all([isinstance(x, Atoms) for x in structures]), \
                    f"Some element of structures is not an ase.atoms.Atoms object!"
-        extract_ptop_from_ase(structures)
+        else: 
+            raise TypeError('The structures argument passed must be either an Atom object (or a list of Atom objects) or a .cfg file!')
+        return extract_prop_from_ase(structures)
     else:
-        extract_prop_from_cfg(filepath)
+        return extract_prop_from_cfg(filepath.absolute())
 
         
 def extract_prop_from_ase(structures):
@@ -293,14 +305,13 @@ def extract_prop_from_ase(structures):
     sigma = + dE/dn (n=strain) (note the sign!)
     
     '''
-    
-    if isinstance(structures, ase.atoms.Atoms):
+    if isinstance(structures, Atoms):
         structures = [structures]
     energy = np.array([x.get_total_energy()/len(x) for x in structures], dtype='float')
     forces = np.array([x.get_forces() for x in structures], dtype='float')
     stress = np.array([x.get_stress() for x in structures], dtype='float')
     
-    return energies, forces, stress
+    return energy, forces, stress
     
 
 
@@ -328,7 +339,8 @@ def extract_prop_from_cfg(filepath):
     sigma = + dE/dn (n=strain) (note the sign!)
     
     '''
-    with open(filepath, 'r') as fl:
+    filepath = Path(filepath)
+    with open(filepath.absolute(), 'r') as fl:
         lines = fl.readlines()
         nlines = len(lines)
         nconf = 0
@@ -429,36 +441,36 @@ def make_comparison(is_ase1=True,
 
     Returns
     -------
-    errs: list of float
-        [rmse, mae, R2] 
+    errs: dict
+    dictionary whose key/vlaue elements are property/errors, where property can be 
+    {'energy', 'forces', 'stress'}, and errors is a list [rmse, mae, R2]. 
         
     '''
     
     if is_ase1 == True:
         assert (structures1 != None), f"When is_ase1 = True, " \
             + f"structures1 must be given!"
-        if isinstance(structures1, ase.atoms.Atoms()):
+        if isinstance(structures1, Atoms):
             structures1 = [structures1]
     else:
-        assert file1 != None, f"When is_ase1 = False, file1 must be given!"
+        assert file1 is not None, f"When is_ase1 = False, file1 must be given!"
         file1 = Path(file1)
-        assert file1.is_file() == True, f"{file1.absolute} is not a file!"
+        assert file1.is_file() == True, f"{file1.absolute()} is not a file!"
         
     if is_ase2 == True:
         assert (structures2 != None), f"When is_ase2 = True, " \
             + f"structures2 must be given!"
-        if isinstance(structures2, ase.atoms.Atoms()):
+        if isinstance(structures2, Atoms):
             structures2 = [structures2]
     else:
-        assert file2 != None, f"When is_ase2 = False, file2 must be given!"
+        assert file2 is not None, f"When is_ase2 = False, file2 must be given!"
         file2 = Path(file1)
-        assert file2.is_file() == True, f"{file2.absolute} is not a file!"
+        assert file2.is_file() == True, f"{file2.absolute()} is not a file!"
     
     if make_file == True:
-        dir = os.path.abspath(dir)
-        if not dir.endswith('/'):
-            dir = dir + '/'
-            
+        if dir is not None:
+            dir = Path(dir)
+                    
     if isinstance(props, str):
         props = [props]
         
@@ -481,21 +493,26 @@ def make_comparison(is_ase1=True,
         ext1 = [x.flatten() for x in extract_prop_from_ase(structures1)]
     else:
         ext1 = [x.flatten() for x in extract_prop_from_cfg(file1)]
-         
+    nstructs = len(ext1[0])
+    natoms = int(len(ext1[1])/3/nstructs)
+
+    ext1[0] = ext1[0] #* natoms
+
     if is_ase2 == True:
         ext2 = [x.flatten() for x in extract_prop_from_ase(structures2)]
     else:
         ext2 = [x.flatten() for x in extract_prop_form_cfg(file2)]
+    ext2[0] = ext2[0] #* natoms
 
     assert len(ext1) == len(ext2), f"You gave a different number of "\
         + f"true and ML structures!"
-        
-    
+
+    dir = Path(dir)
     # Compute errors and write data on files
     errs = dict()
     for prop in props:
         i = prop_numbs[prop]
-        filename = f'{dir}{outfile_pref}{cap_first(prop)}_comparison.dat'
+        filename = dir.joinpath(f'{outfile_pref}{cap_first(prop)}_comparison.dat')
         mae2 = mae(ext1[i], ext2[i])
         rmse2 = rmse(ext1[i], ext2[i])
         R22 = R2(ext1[i], ext2[i])
@@ -506,12 +523,36 @@ def make_comparison(is_ase1=True,
             text += f'#  True {low_first(prop)}           Predicted {low_first(prop)}\n'
             for x, y in zip(ext1[i], ext2[i]):
                 text += f'{x:.20f}  {y:.20f}\n'
-            with open(filename, 'w') as fl:
+            with open(filename.absolute(), 'w') as fl:
                 fl.write(text)
     return errs
 
+def set_level_to_pot_file(trained_pot_file_path, mtp_level):
+    fp = Path(trained_pot_file_path)
+    assert fp.is_file(), f"{fp.absolute()} is not a regular file!"
+    assert isinstance(mtp_level, int) or \
+           isinstance(mtp_level, float), f"mtp_level must be an integer!"
+    mtp_level = int(mtp_level) # in case it's float
+    with open(fp.absolute(), 'r') as fl:
+        lines = fl.readlines()
+    with open(fp.absolute(), 'w') as fl:
+        for i, line in enumerate(lines):
+            if 'potential_name' in line:
+                lines[i] = f'potential_name = MTP_{mtp_level}\n'
+        fl.writelines(lines)
 
-def train_pot_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_set_path, dir, params, mpirun=''):
+def train_pot_tmp(mlip_bin, 
+                  untrained_pot_file_dir,
+                  mtp_level,
+                  min_dist,
+                  max_dist,
+                  species_count,
+                  radial_basis_size,
+                  radial_basis_type,
+                  train_set_path,
+                  dir,
+                  params,
+                  mpirun=''):
     '''Function to train the MTP model, analogous to train_pot, but the init.mtp file is created by asking the level
     
         Parameters
@@ -524,6 +565,16 @@ def train_pot_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_set_path, d
             path to the directory containing the untrained mtp init files (.mtp)
         mtp_level: {2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 21, 22, 24, 26, 28}
             level of the mtp model to train
+        min_dist: float
+            minimum distance between atoms in the system (unit: Angstrom)
+        max_dist: float
+            cutoff radius for the radial part (unit: Angstrom)
+        species_count: int
+            number of elements present in the dataset
+        radial_basis_size: int, default=8
+            number of basis functions to use for the radial part
+        radial_basis_type: {'RBChebyshev', ???}, default='RBChebyshev'
+            type of basis functions to use for the radial part
         train_set_path: str 
             path to the training set (.cfg)
         dir: str
@@ -547,7 +598,7 @@ def train_pot_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_set_path, d
                 if not empty, save potential on each iteration with name = cur_pot_n
             trained_pot_name: str, default="Trained.mtp"
                 filename for trained potential.
-            bgfs_tol: float, default=1e-3
+            bfgs_tol: float, default=1e-3
                 stop if error dropped by a factor smaller than this over 50 BFGS 
                 iterations
             weighting: {'vibrations', 'molecules', 'structures'}, default=vibrations 
@@ -576,7 +627,7 @@ def train_pot_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_set_path, d
                      max_iter = '--max-iter',
                      cur_pot_n = '--curr-pot-name',
                      trained_pot_name = '--trained-pot-name',
-                     bgfs_tol = '--bgfs-conv-tol',
+                     bfgs_tol = '--bfgs-conv-tol',
                      weighting = '--weighting',
                      init_par = '--init-params',
                      skip_preinit = '--skip-preinit',
@@ -596,23 +647,30 @@ def train_pot_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_set_path, d
                 cmd = f'{cmd} {flags[par]}={params[par]}'         
         return cmd
     
-    dir = os.path.abspath(dir)
-    if not dir.endswith('/'):
-        dir += '/'
-    
+    dir = Path(dir)
+    mlip_bin = Path(mlip_bin)
+    untrained_pot_file_dir = Path(untrained_pot_file_dir)
+    train_set_path = Path(train_set_path)
+                 
     if 'trained_pot_name' not in list(params.keys()):
         params['trained_pot_name'] = 'pot.mtp'
-    
     flags = get_flags(params)
-    init_name = f'{int(mtp_level):0>2d}.mtp'
-    init_path = Path(untrained_pot_file_dir).joinpath(init_name)
-    cmd = f'{mpirun} {mlip_bin} train {init_path} {train_set_path} {flags}'
-    print(cmd)
-    log_path = f'{dir}log_train'
-    err_path = f'{dir}err_train'
-    with open(log_path, 'w') as log, open(err_path, 'w') as err:
-        run(cmd.split(), cwd=dir, stdout=log, stderr=err)
-        
+    make_mtp_file(sp_count=species_count,
+                  mind=min_dist,
+                  maxd=max_dist,
+                  rad_bas_sz=radial_basis_size,
+                  rad_bas_type=radial_basis_type, 
+                  lev=mtp_level, 
+                  mtps_dir=untrained_pot_file_dir.absolute(),
+                  wdir=dir.absolute(), 
+                  out_name='init.mtp')
+    init_path = Path(dir).joinpath('init.mtp')
+    cmd = f'{mpirun} {Path(mlip_bin).absolute()} train {init_path.absolute()} {train_set_path.absolute()} {flags}'
+    log_path = dir.joinpath('log_train')
+    err_path =dir.joinpath('err_train')
+    with open(log_path.absolute(), 'w') as log, open(err_path.absolute(), 'w') as err:
+        run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)
+    set_level_to_pot_file(trained_pot_file_path=dir.joinpath(params['trained_pot_name']).absolute(), mtp_level=mtp_level)    
         
 def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun=''):
     '''
@@ -632,8 +690,8 @@ def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun=''):
         val_cfg(str):  filename with configuration to validate
         max_iter(int): maximal number of iterations. Default=1000
         cur_pot_n(str): if not empty, save potential on each iteration with name = cur_pot_n.
-        tr_pot_n(str): filename for trained potential. Default=Trained.mtp_
-        bgfs_tol(float): stop if error dropped by a factor smaller than this over 50 BFGS iterations. 
+        trained_pot_name(str): filename for trained potential. Default=Trained.mtp_
+        bfgs_tol(float): stop if error dropped by a factor smaller than this over 50 BFGS iterations. 
                          Default=1e-3
         weighting(str): how to weight configuration wtih different sizes relative to each other. 
                    Default=vibrations. Other=molecules, structures.
@@ -653,8 +711,8 @@ def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun=''):
                      val_cfg = '--valid_cfgs',
                      max_iter = '--max-iter',
                      cur_pot_n = '--curr-pot-name',
-                     tr_pot_n = '--trained-pot-name',
-                     bgfs_tol = '--bgfs-conv-tol',
+                     trained_pot_name = '--trained-pot-name',
+                     bfgs_tol = '--bfgs-conv-tol',
                      weighting = '--weighting',
                      init_par = '--init-params',
                      skip_preinit = '--skip-preinit',
@@ -676,21 +734,23 @@ def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun=''):
     
     
     
-    dir = os.path.abspath(dir)
-    if not dir.endswith('/'):
-        dir += '/'
+    dir = Path(dir)
+    mlip_bin = Path(mlip_bin)
+    train_set_path = Path(train_set_path) 
+    init_path = Path(init_path)
     
-    if 'tr_pot_n' not in list(params.keys()):
-        params['tr_pot_n'] = 'pot.mtp'
+    if 'trained_pot_name' not in list(params.keys()):
+        params['trained_pot_name'] = 'pot.mtp'
     
     flags = get_flags(params)
-    cmd = f'{mpirun} {mlip_bin} train {init_path} {train_set_path} {flags}'
-    print(cmd)
-    log_path = f'{dir}log_train'
-    err_path = f'{dir}err_train'
-    with open(log_path, 'w') as log, open(err_path, 'w') as err:
-        run(cmd.split(), cwd=dir, stdout=log, stderr=err)
-        
+    cmd = f'{mpirun} {mlip_bin.absolute()} train {init_path.absolute()} {train_set_path.absolute()} {flags}'
+    log_path = dir.joinpath('log_train')
+    err_path = dir.joinpath('err_train')
+    with open(log_path.absolute(), 'w') as log, open(err_path.absolute(), 'w') as err:
+        run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)
+    set_level_to_pot_file(trained_pot_file_path=dir.joinpath(params['trained_pot_name']).absolute(), mtp_level=mtp_level)
+
+
 def train_pot_from_ase(mlip_bin, init_path, train_set, dir, params, mpirun=''):
     '''
     Function to train the MTP model
@@ -709,8 +769,8 @@ def train_pot_from_ase(mlip_bin, init_path, train_set, dir, params, mpirun=''):
         val_cfg(str):  filename with configuration to validate
         max_iter(int): maximal number of iterations. Default=1000
         cur_pot_n(str): if not empty, save potential on each iteration with name = cur_pot_n.
-        tr_pot_n(str): filename for trained potential. Default=Trained.mtp_
-        bgfs_tol(float): stop if error dropped by a factor smaller than this over 50 BFGS iterations. 
+        trained_pot_name(str): filename for trained potential. Default=Trained.mtp_
+        bfgs_tol(float): stop if error dropped by a factor smaller than this over 50 BFGS iterations. 
                          Default=1e-3
         weighting(str): how to weight configuration wtih different sizes relative to each other. 
                    Default=vibrations. Other=molecules, structures.
@@ -721,19 +781,32 @@ def train_pot_from_ase(mlip_bin, init_path, train_set, dir, params, mpirun=''):
         up_mindist(bool): updating the mindist parameter with actual minimal interatomic distance in
                           the training set
     '''
-    cfg_path = Path(dir).joinpath('TrainSet.cfg')
+    mlip_bin = Path(mlip_bin)
+    init_path = Path(init_path)
+    dir = Path(dir)
+    cfg_path = dir.joinpath('TrainSet.cfg')
     conv_ase_to_mlip2(atoms=train_set,
-                      out_path=cfg_path,
+                      out_path=cfg_path.absolute(),
                       props=True)
     
-    train_pot(mlip_bin=mlip_bin,
-              init_path=init_path,
-              train_set_path=cfg_path, 
-              dir=dir,
+    train_pot(mlip_bin=mlip_bin.absolute(),
+              init_path=init_path.absolute(),
+              train_set_path=cfg_path.absolute(), 
+              dir=dir.absolute(),
               params=params,
               mpirun=mpirun)
     
-def train_pot_from_ase_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_set, dir, params, mpirun=''):
+def train_pot_from_ase_tmp(mlip_bin,
+                           untrained_pot_file_dir,
+                           mtp_level,
+                           min_dist,
+                           max_dist,
+                           radial_basis_size,
+                           radial_basis_type,
+                           train_set,
+                           dir,
+                           params,
+                           mpirun=''):
     '''Function to train the MTP model
     
     Parameters
@@ -746,6 +819,14 @@ def train_pot_from_ase_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_se
         path to the directory containing the untrained mtp init files (.mtp)
     mtp_level: {2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 21, 22, 24, 26, 28}
         level of the mtp model to train
+    min_dist: float
+        minimum distance between atoms in the system (unit: Angstrom)
+    max_dist: float
+        cutoff radius for the radial part (unit: Angstrom)
+    radial_basis_size: int, default=8
+            number of basis functions to use for the radial part
+    radial_basis_type: {'RBChebyshev', ???}, default='RBChebyshev'
+        type of basis functions to use for the radial part
     train_set: list, ase.atoms.Atoms 
         list of ase Atoms objects; energy, forces and stresses must have been 
         computed and stored in each Atoms object
@@ -770,7 +851,7 @@ def train_pot_from_ase_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_se
             if not empty, save potential on each iteration with name = cur_pot_n
         trained_pot_name: str, default="Trained.mtp"
             filename for trained potential.
-        bgfs_tol: float, default=1e-3
+        bfgs_tol: float, default=1e-3
             stop if error dropped by a factor smaller than this over 50 BFGS 
             iterations
         weighting: {'vibrations', 'molecules', 'structures'}, default=vibrations 
@@ -787,22 +868,33 @@ def train_pot_from_ase_tmp(mlip_bin, untrained_pot_file_dir, mtp_level, train_se
             updating the mindist parameter with actual minimal interatomic 
             distance in the training set
     '''
-    cfg_path = Path(dir).joinpath('TrainSet.cfg')
+    dir = Path(dir)
+    mlip_bin = Path(mlip_bin)
+    untrained_pot_file_dir = Path(untrained_pot_file_dir)    
+    cfg_path = dir.joinpath('TrainSet.cfg')
+    
     conv_ase_to_mlip2(atoms=train_set,
-                      out_path=cfg_path,
+                      out_path=cfg_path.absolute(),
                       props=True)
     
-    train_pot_tmp(mlip_bin=mlip_bin,
-                  untrained_pot_file_dir=untrained_pot_file_dir,
+    species_count = len(list(set(np.array([x.get_chemical_symbols() for  x in train_set]).flatten())))
+    #print('inside train_pot_from_ase_tmp calling for train_pot_tmp')
+    train_pot_tmp(mlip_bin=mlip_bin.absolute(),
+                  untrained_pot_file_dir=untrained_pot_file_dir.absolute(),
                   mtp_level=mtp_level,
-                  train_set_path=cfg_path, 
-                  dir=dir,
+                  species_count=species_count,
+                  min_dist=min_dist,
+                  max_dist=max_dist,
+                  radial_basis_size=radial_basis_size,
+                  radial_basis_type=radial_basis_type,
+                  train_set_path=cfg_path.absolute(), 
+                  dir=dir.absolute(),
                   params=params,
                   mpirun=mpirun)
     
 
 def pot_from_ini(fpath):
-    with open(fpath, 'r') as fl:
+    with open(Path(fpath).absolute(), 'r') as fl:
         lines = fl.readlines()
     for line in lines:
         if 'mtp-filename' in line:
@@ -828,26 +920,39 @@ def calc_efs(mlip_bin, mpirun='', confs_path='in.cfg', pot_path='pot.mtp', out_p
     dir(str): directory where to calculate efs
     '''
     
-    if dir == None:
+    if dir is None:
         raise ValueError('Please specify a directory!')
-    dir = os.path.abspath(dir)
-    if not dir.endswith('/'):
-        dir += '/'
+        
+    dir = Path(dir)
+    if confs_path is not None:
+        confs_path = Path(confs_path)
+    if pot_path is not None:
+        pot_path = Path(pot_path)
+    if out_path is not None:
+        out_path = Path(out_path)
     
-    cmd = f'{mpirun} {mlip_bin} calc-efs {pot_path} {confs_path} {out_path}'
-    log_path = f'{dir}log_calc_efs'
-    err_path = f'{dir}err_calc_efs'
-    with open(log_path, 'w') as log, open(err_path, 'w') as err:
-        print(cmd)
-        run(cmd.split(), cwd=dir, stdout=log, stderr=err)
+    cmd = f'{mpirun} {mlip_bin.absolute()} calc-efs {pot_path.absolute()} {confs_path.absolute()} {out_path.absolute()}'
+    log_path = dir.joinpath('log_calc_efs')
+    err_path = dir.joinpath('err_calc_efs')
+    with open(log_path.absolute(), 'w') as log, open(err_path.absolute(), 'w') as err:
+        #print(cmd)
+        run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)
         
 
-def calc_efs_from_ase(mlip_bin, atoms, mpirun='', pot_path='pot.mtp', cfg_files=False, out_path='./out.cfg', dir='./', write_conf=False, outconf_name=None):
+def calc_efs_from_ase(mlip_bin, 
+                      atoms, 
+                      mpirun='', 
+                      pot_path='pot.mtp', 
+                      cfg_files=False, 
+                      out_path='./out.cfg',
+                      dir='./',
+                      write_conf=False, 
+                      outconf_name=None):
     '''
     Function to calculate energies, forces, and stresses for the configurations in an ASE trajectory with
     pot.mtp, writing the result into the same trajectory (plus out.cfg, if wanted).
     
-    Paramters
+    Parameters
     ---------
     mlip_bin: str
         path to the mlip binary file
@@ -877,31 +982,41 @@ def calc_efs_from_ase(mlip_bin, atoms, mpirun='', pot_path='pot.mtp', cfg_files=
 
     '''
     
+    if dir is None:
+        raise ValueError('Please specify a directory!')
+        
+    dir = Path(dir)
+    if pot_path is not None:
+        pot_path = Path(pot_path)
+    if out_path is not None:
+        out_path = Path(out_path)
+    if mlip_bin is not None:
+        mlip_bin = Path(mlip_bin)
     
-    dir = path(dir)
     # first we need to convert ASE to cfg
-    cfg_traj = f'{dir}in.cfg'
-    conv_ase_to_mlip2(atoms, cfg_traj, props=False)
+    cfg_traj = dir.joinpath('in.cfg')
+    atoms = cp(atoms)
+    conv_ase_to_mlip2(atoms, cfg_traj.absolute(), props=False)
     
     # compute the properties
-    calc_efs(mlip_bin, mpirun=mpirun, confs_path=cfg_traj, pot_path=pot_path, out_path=f'{dir}{out_path}', dir=dir)
+    calc_efs(mlip_bin.absolute(), mpirun=mpirun, confs_path=cfg_traj.absolute(), pot_path=pot_path.absolute(), out_path=dir.joinpath(out_path).absolute(), dir=dir.absolute())
     
     # extract the properties from the results
-    energy, forces, stress = extract_prop(f'{dir}{out_path}')
-    
+    energy, forces, stress = extract_prop(filepath=dir.joinpath(out_path).absolute()) # energy per atom!!
     # for each configuration create the SinglePoint calculator and assign it, then "compute" the properties
     for i, atom in enumerate(atoms):
-        calc = SinglePointCalculator(atom, energy=energy[i], forces=forces[i], stress=stress[i])
+        calc = SinglePointCalculator(atom, energy=energy[i]*len(atom), forces=forces[i], stress=stress[i])
         atom.calc = calc
         atom.get_potential_energy()
     
     if write_conf == True:
         if outconf_name is None:
             outconf_name = f'confs.traj'
-        write(f'{dir}{outconf_name}', atoms)
+        write(dir.joinpath(outconf_name).absolute(), atoms)
     
     if cfg_files == False:
-        os.system(f'rm {cfg_traj} {dir}{out_path}')
+        cfg_traj.unlink(missing_ok=True)
+        dir.joinpath(out_path).unlink(missing_ok=True)
         
     return atoms
    
@@ -918,4 +1033,29 @@ def find_min_dist(trajectory):
             dist = np.concatenate((dist, dd))
         mindist.append(dist.min())
     return min(mindist)
+
+
+def make_ini_for_lammps(pot_file_path, out_file_path):
+    '''Function to create the ini file for lammps
+    
+    Parameters
+    ----------
+
+    pot_file_path: str
+        path to the .mtp file, that will be printed in the
+        ini file for lammps
+    out_file_path: str
+        path of the ini file to generate
+
+    '''
+    pot_file_path = Path(pot_file_path)
+    txt = f'mtp-filename {pot_file_path.absolute()}\n'
+    txt += f"select FALSE"
+    out_file_path = Path(out_file_path)
+    with open(out_file_path.absolute(), 'w') as fl:
+        fl.writelines(txt)
+
+        
+
+
 
