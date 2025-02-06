@@ -7,6 +7,7 @@ import shutil
 import numbers
 from pathlib import Path
 import logging
+from scipy.stats import linregress
 
 
 def mkdir_warner(dir_path, interactive=False):
@@ -337,12 +338,14 @@ def R2(data1, data2):
     if len(data1) != len(data2):
         raise ValueError('The two array must have the same size!')
     
-    mean = np.mean(data2)
+    mean = np.mean(data1)
     rss = np.sum((data2 - data1)**2)# residual sum of squares
     tss = np.sum((data2 - mean)**2) # total sum of squares
     R2 = 1 - rss / tss
     #print(f'data1: {data1}, data2: {data2}, rss: {rss}, tss: {tss}, R2: {R2}')
-    return R2
+
+    slope, intercept, r_value, p_value, std_err = linregress(data1, data2)
+    return r_value**2
 
 def time_to_three(time, unit='s'):
     import math 
