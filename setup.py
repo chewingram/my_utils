@@ -13,6 +13,7 @@ setup(
         "console_scripts": [
             "make_md = my_utils.utils_md:make_md",
             "atlen = my_utils.utils:atlen",
+            "wrap = my_utils.utils_md:wrap",
         ],
     },
     classifiers=[

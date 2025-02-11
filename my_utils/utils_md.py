@@ -618,6 +618,22 @@ def time_convergence_npt(traj, mult_mat=np.eye(3), units=['$\AA$', 'fs']):
     
     fig.set_suptitle('Cell parameters for the thermalized unitcell vs. time of simulation')
     
+
+def wrap(fpath='./Trajectory.traj')
+    def modified_decimal_part(arr):
+        decimal_part = np.abs(arr) - np.floor(np.abs(arr))  # Compute decimal part
+        return np.where(arr >= 0, decimal_part, 1 - decimal_part)  # Apply transformation
+    
+    
+    ats = read(fpath, index=':')
+    new_ats = []
+    for at in ats:
+        cell = at.get_cell()
+        pos = at.get_scaled_positions()
+        new_pos = modified_decimal_part(pos)    
+        at.set_scaled_positions(new_pos)
+    
+    write('w_Trajectory.traj', ats)
     
     
     
