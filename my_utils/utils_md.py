@@ -9,7 +9,7 @@ from ase.calculators.lammpsrun import LAMMPS
 from mlacs.state import LammpsState
 from mlacs.utilities.io_lammps import reconstruct_mlmd_trajectory
 import sys
-from .utils import path
+from .utils import path, min_distance_to_surface, mic_sign
 from .utils_mlip import calc_efs_from_ase, pot_from_pair_style
 import builtins    
 
@@ -579,7 +579,7 @@ def time_convergence_npt(traj, mult_mat=np.eye(3), units=['$\AA$', 'fs']):
     n_structs = len(traj)
     cells = np.zeros((n_structs, 3, 3))
     for i in range(n_structs):
-        cells[i] += np.array([x.get_cell() x in traj[:i+1]]).mean(axis=0)
+        cells[i] += np.array([x.get_cell() for x in traj[:i+1]]).mean(axis=0)
     B = np.linalg.inv(mult_mat)
     ucells = np.array([make_supercell(x, B) for x in cells])
 
@@ -619,12 +619,16 @@ def time_convergence_npt(traj, mult_mat=np.eye(3), units=['$\AA$', 'fs']):
     fig.set_suptitle('Cell parameters for the thermalized unitcell vs. time of simulation')
     
 
-def wrap(fpath='./Trajectory.traj')
+def wrap(*args):
     def modified_decimal_part(arr):
         decimal_part = np.abs(arr) - np.floor(np.abs(arr))  # Compute decimal part
         return np.where(arr >= 0, decimal_part, 1 - decimal_part)  # Apply transformation
     
-    
+    if len(sys.argv) < 2:
+        fpath = 'Trajectory.traj'
+    else:
+        fpath = sys.argv[1] 
+    fpath = Path(fpath)
     ats = read(fpath, index=':')
     new_ats = []
     for at in ats:
@@ -632,10 +636,179 @@ def wrap(fpath='./Trajectory.traj')
         pos = at.get_scaled_positions()
         new_pos = modified_decimal_part(pos)    
         at.set_scaled_positions(new_pos)
+    parent = fpath.parent
+    fname = 'w_' + fpath.name
+    write(parent.joinpath(fname), ats)
     
-    write('w_Trajectory.traj', ats)
+
+def rdf(cell, pos, centers, coords, V=None, nbins=100, cutoff=None):   
+    '''Function to calculate the radial distribution function from a set of positions. The cutoff will be chosen 
+    automatically as half of the minimum axis lentgh (or the maximum distance between atoms, if it is shorter)/ 
+
+    Parameters
+    ----------
+    cell: np.array (3x3)
+        axis of the box. cell[i,j] = j-th cartesian component of the i-th axis
+    pos: np.array (Nx3)
+        positions of the particles in cartesian coordinates; N = number of particles. 
+        pos[i,j] = j-th cartesian component of the position of the i-th particle
+    centers: np.array(Mx3)
+        List of the indices of the atoms (centers) to compute the rdf for; centers[i] = index of the position of the i-th center in
+        pos.
+    coords: list
+        List of the indices of the atoms (coords) to consider for each center; coords[i,j] = index of the position of the j-th coord 
+        for the i-th center in pos. Note: if two or more centers have a different number of coords, the function will slow down!
+    V: float; default=np.linalg.det(cell)
+        volume of the box to use to renormalize the rdf
+    nbins: int; default=100
+        number of x-values of the rdf. Beware: too big nbins will lead to errors!
+    cutoff: float; default= the minimum distance between the center of the cell and the surface. 
+    Returns
+    -------
+    rdf_at: np.array(Nxnbins)
+        radial distribution functions for each center, considering the respective coords
+    bincs: np.array(nbins)
+        x-values of the rdf
+    cutoff: float
+        cutoff used for the rdf (it should close to the last element of bincs)
+    '''
+
     
     
+    # type checks
+    if not isinstance(cell, type(np.array([]))):
+        raise TypeError('cell must be a 3x3 numpy array!')
+    elif not cell.shape == np.ones((3,3)).shape:
+        raise TypeError('cell must be a 3x3 numpy array!')
+    elif np.linalg.det(cell) == 0:
+        raise ValueError('the cell axes are not linearly indendent!')
+
+    if not isinstance(pos, type(np.array([]))):
+        raise TypeError('pos must be a numpy array!')
+    elif len(pos.shape) != 2 or pos.shape[1] != 3:
+        raise TypeError('pos elements must be 1x3 numpy arrays!')
+
+    if not isinstance(centers, type(np.array([]))):
+        raise TypeError('centers must be a numpy array!')
+
+    if not isinstance(coords, list) or not all([isinstance(x, list) for x in coords]):
+        raise TypeError('coords must be a list of lists!')
+    elif not all([isinstance(x, int) for y in coords for x in y]):
+        raise TypeError('coords must be a list of lists of integers!')
+
+        
+    
+    # we need the reduced coordinates
+    rpos = np.linalg.inv(cell.T) @ pos.T
+    rpos = rpos.T # Nx3
+    
+    if V is None:
+        V = abs(np.linalg.det(cell))
+    
+    # let's define the maximum cutoff (it will be then compared to the maximum atomic distance)
+    max_cutoff = min_distance_to_surface(cell)
+    
+    cell_n = np.linalg.norm(cell, axis=1) # auxiliary variable with the lenghts of the axes
+    
+    ncenters = len(centers)
+    ncoords = np.array([len(x) for x in coords])
+
+    if (ncoords == ncoords[0]).all():
+
+        # do you want to understand the following expression? Go to the end of the function, then.
+        D = np.linalg.norm(np.transpose(cell @ np.transpose(mic_sign(rpos[centers, None, :] - rpos[coords]), (0, -1, -2)), (0, -1, -2)), axis=2)
+        #D = np.linalg.norm(mic(rpos[:, None, :] - rpos[coords]) @ cell, axis=2)
+        
+        # let's get the density
+        rho = ncoords[0] / V # for each center, the number of coordinants is the same, so this formula holds for any center
+    
+        # BINNING
+        # let's create the bin centers
+        cutoff = max_cutoff * 1.0001
+        #cutoff = min(D.max(), max_cutoff) * 1.00001 # Ensure cutoff doesn't exceed half the box size; the scaling is
+                                                    # needed for numerical reasons
+        step = cutoff / nbins
+        bincs = np.array(range(0,nbins)) * step + step/2 
+        
+        # let's create the bin volumes
+        binvs = (4/3) * np.pi * ((bincs + step/2)**3 - (bincs - step/2)**3)
+    
+        rdf_at = np.zeros((ncenters, len(bincs))) # initialize the rdf for all the centers
+        for i in range(D.shape[0]): # loop over the atoms
+            # let's turn each element of the row into the respective nearest element in the bin centers
+            indices = np.floor((np.extract(D[i]<cutoff, D[i]) - step/2) / step + 0.5).astype(int)
+            approx = bincs[indices]
+            for j in range(len(bincs)):
+                rdf_at[i,j] += (indices == j).sum()
+        # now rdf_at contains the rdf for each atom
+        rdf_at /= binvs * rho
+    
+        #return rdf_at, bincs, cutoff
+        
+    else:
+        # first create a set of unique number of coords
+        set_nums = list(set([len(x) for x in coords]))
+        set_nums.sort()
+        center_groups = []
+        for set_num in set_nums:
+            center_group = []
+            for i, ncoord in enumerate(ncoords):
+                #print(f'ncoord= {ncoord}, set_num= {set_num}')
+                if ncoord == set_num:
+                    center_group.append(i)
+            center_group = np.array(center_group, dtype='int')
+            center_groups.append(center_group)
+
+        rdf_collection = []
+        for center_group in center_groups:
+            res, bincs, cutoff = rdf(cell, pos, centers[center_group], [coords[i] for i in center_group], V=None, nbins=100)
+            rdf_collection.append(res)
+        rdf_collection = np.vstack(rdf_collection)   
+        flat_center_groups = np.concatenate(center_groups)  # now here we have the indices of the centers in the same order as in rdf_collection
+        sort_indices = np.argsort(flat_center_groups)
+        rdf_at = rdf_collection[sort_indices]
+            # bincs and cutoff that will be returned are those from the last iteration of the for loop
+        
+    # Before returning let's break down the hell broadcasting used to generate D
+    # Let's start by taking rpos[coords]: it has shape (ncenters, ncoords, 3) and for each center there is a row for each 
+    # coordinating atom (coord) and for each coord there are three reduced coordinates (hence a vector). 
+    # We need to subtract each vector associated to a single center to that center's rpos. So we take rpos[centers], which has shape
+    # (ncenters,3) and subtract to it rpos[coords]. In terms of shapes: (ncenters,3) - (ncenters, ncoords, 3). Following the broadcasting
+    # rules of numpy, the last two dimensions are mapped between the two arrays, while for the third one (from right), a 1 
+    # is assumed for the first shape. The operation now would be: (1,ncenters,3) - (ncenters,ncoords,3). The dimensions do not correspond.
+    # In order to solve this, we need to change the shape from (1, ncenters, 3) to (ncenters, 1, 3). This way, in the second dimension
+    # the elements are duplicated as many times as needed to perform the subtraction. Namely, rpos[centers][i,j] = rpos[centers][i,j+1]...
+    # To do so, we need to add a dimension in the middle of rpos[centers] ---> rpos[centers][:, None, :]. Now this has a shape that will be
+    # correctly broadcasted. 
+    # Now that the operation rpos[centers][:, None, :] - rpos[coords] has the proper shape: (ncenters, 1, 3) - (ncenters, ncoords, 3),
+    # we obtain an array of distances between the centers and their respective coords, having shape (ncenters, ncoords, 3).
+    # We need to apply the mininum image convention to them, hence we pass them to the mic() function (it's simple enough to not deserve
+    # an explanation). So far the instruction is:
+    #     mic(rpos[centers][:, None, :] - rpos[coords])
+    # This gives us a similar array with the same shape (ncenters, ncoords, 3), the only difference is in the actual numbers inside.
+    # Now we need to convert them to cartesian coordinates (before getting the norm).
+    # The matrix formula to convert a vector from the reduced basis to the cartesian one is x_c = cell @ x_r, where cell[i,j] is the
+    # i-th cartesian component of the j-th unit vector, and both x_c and x_r are column vectors, hance have shape (3,1).
+    # In our case both cell and the vectors are transposed, so we need*** to transpose both before multiplying, multiply them and then
+    # re-transpose the result. To transpose the cell we just write cell.T, to transpose the distance vectors, we need to use the np.transpose
+    # function, as the vectors are themselved inside arrays. Remember that the distance array now has shape (ncenters, ncoords, 3);
+    # we need to transpose each matrix defined by the last two indices, hence we have to swap the last two dimensions.
+    # We do it by using np.transpose(distance_vector, (0, -1, -2)).
+    # The instruction so far is:
+    #     cell.T @ np.transpose(mic(rpos[centers][:, None, :] - rpos[coords]), (0, -1, -2))
+    # The result has the shape (ncenters, 3, ncoords), and we need to re-transpose it to take it back to the previous form:
+    #     np.transpose(cell.T @ np.transpose(mic(rpos[centers][:, None, :] - rpos[coords]), (0, -1, -2)), (0, -1, 2))
+    # Now we have a (ncenters, ncoords, 3) array with the distance vectors in cartesian coordinates and we just need to get the norm.
+    #     np.linalg.norm(np.transpose(cell.T @ np.transpose(mic(rpos[centers][:, None, :] - rpos[coords]), (0, -1, -2)), (0, -1, 2)), axis=2)
+    # where we asked to compute the norm on the last axis.
+    # That's it!
+
+    # ***In principle we can avoid the transposition, indeed since both the cell and the vectors are transposed, we can just invert the order
+    # in the multiplication. In this case the final instruction would be shorter and simpler:
+    #     np.linalg.norm(mic(rpos[:, None, :] - rpos[coords]) @ cell, axis=2)
+    # however, for some reason it is slower.
+    
+    return rdf_at, bincs, cutoff
     
     
     

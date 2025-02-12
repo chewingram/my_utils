@@ -567,3 +567,40 @@ def mute_logger(name="mute_logger"):
     logger.addHandler(logging.NullHandler())  # Attach a NullHandler to discard messages
     return logger   
         
+
+def min_distance_to_surface(cell):
+    """
+    Compute the minimum distance from the center to the surface of a parallelepiped
+    given a 3x3 cell matrix (each row is a lattice vector).
+    
+    Parameters:
+        cell (numpy.ndarray): 3x3 matrix where rows are the three lattice vectors.
+    
+    Returns:
+        float: The minimum distance from the center to the surface.
+    """
+    # Extract vectors from the cell matrix (each row corresponds to a lattice vector)
+    v1, v2, v3 = cell[0], cell[1], cell[2]
+
+    # Compute face distances (perpendicular distances to three non-equivalent faces)
+    d_face1 = 0.5 * np.linalg.norm(np.cross(v2, v3)) / np.linalg.norm(v1)
+    d_face2 = 0.5 * np.linalg.norm(np.cross(v3, v1)) / np.linalg.norm(v2)
+    d_face3 = 0.5 * np.linalg.norm(np.cross(v1, v2)) / np.linalg.norm(v3)
+
+    # Compute edge distances (shortest distances to edges)
+    d_edge12 = 0.5 * np.linalg.norm(np.cross(v1, v2)) / np.sqrt(np.linalg.norm(v1)**2 + np.linalg.norm(v2)**2)
+    d_edge23 = 0.5 * np.linalg.norm(np.cross(v2, v3)) / np.sqrt(np.linalg.norm(v2)**2 + np.linalg.norm(v3)**2)
+    d_edge31 = 0.5 * np.linalg.norm(np.cross(v3, v1)) / np.sqrt(np.linalg.norm(v3)**2 + np.linalg.norm(v1)**2)
+
+    # Compute vertex distance (shortest distance to the nearest vertex)
+    d_vertex = 0.5 * np.linalg.norm(v1 + v2 + v3) / np.sqrt(3)
+
+    # Find the minimum distance among face, edge, and vertex distances
+    return min(d_face1, d_face2, d_face3, d_edge12, d_edge23, d_edge31, d_vertex)
+
+def mic_sign(vec):
+    '''
+    Miminum image convention applying pbc preserving the sign
+    vec must be in reduced coordinates, np.arrays
+    '''
+    return vec - np.round(vec)
