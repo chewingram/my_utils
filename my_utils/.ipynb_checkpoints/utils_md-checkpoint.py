@@ -1,17 +1,36 @@
 import os
-import numpy as np
+import builtins 
 import argparse
 from copy import deepcopy as cp
 from pathlib import Path
+import sys
+
+import numpy as np
+
 from ase.io import read, write, Trajectory
 from ase.build import make_supercell
 from ase.calculators.lammpsrun import LAMMPS
+from ase.geometry.analysis import Analysis
+from ase.atoms import Atoms
+from ase.data import atomic_numbers as ase_atnums
+from ase.data import chemical_symbols as ase_chemsym
+
 from mlacs.state import LammpsState
 from mlacs.utilities.io_lammps import reconstruct_mlmd_trajectory
-import sys
-from .utils import path
+
+from .utils import path, min_distance_to_surface, mic_sign, flatten, lc
 from .utils_mlip import calc_efs_from_ase, pot_from_pair_style
-import builtins    
+
+from matplotlib import pyplot as plt
+from matplotlib.animation import PillowWriter
+
+from functools import reduce
+
+from time import time
+
+
+
+
 
 
 original_print = builtins.print
@@ -579,7 +598,7 @@ def time_convergence_npt(traj, mult_mat=np.eye(3), units=['$\AA$', 'fs']):
     n_structs = len(traj)
     cells = np.zeros((n_structs, 3, 3))
     for i in range(n_structs):
-        cells[i] += np.array([x.get_cell() x in traj[:i+1]]).mean(axis=0)
+        cells[i] += np.array([x.get_cell() for x in traj[:i+1]]).mean(axis=0)
     B = np.linalg.inv(mult_mat)
     ucells = np.array([make_supercell(x, B) for x in cells])
 
@@ -618,10 +637,590 @@ def time_convergence_npt(traj, mult_mat=np.eye(3), units=['$\AA$', 'fs']):
     
     fig.set_suptitle('Cell parameters for the thermalized unitcell vs. time of simulation')
     
+
+def wrap(*args):
+    def modified_decimal_part(arr):
+        decimal_part = np.abs(arr) - np.floor(np.abs(arr))  # Compute decimal part
+        return np.where(arr >= 0, decimal_part, 1 - decimal_part)  # Apply transformation
+    
+    if len(sys.argv) < 2:
+        fpath = 'Trajectory.traj'
+    else:
+        fpath = sys.argv[1] 
+    fpath = Path(fpath)
+    ats = read(fpath, index=':')
+    new_ats = []
+    for at in ats:
+        cell = at.get_cell()
+        pos = at.get_scaled_positions()
+        new_pos = modified_decimal_part(pos)    
+        at.set_scaled_positions(new_pos)
+    parent = fpath.parent
+    fname = 'w_' + fpath.name
+    write(parent.joinpath(fname), ats)
+    
+
+def rdf(cell, pos, centers, coords, V=None, nbins=100, cutoff=None, clip_autocorr=True):   
+    '''Function to calculate the radial distribution function from a set of positions. The cutoff will be chosen 
+    automatically as half of the minimum axis lentgh (or the maximum distance between atoms, if it is shorter)/ 
+
+    Parameters
+    ----------
+    cell: np.array (3x3)
+        axis of the box. cell[i,j] = j-th cartesian component of the i-th axis
+    pos: np.array (Nx3)
+        positions of the particles in cartesian coordinates; N = number of particles. 
+        pos[i,j] = j-th cartesian component of the position of the i-th particle
+    centers: np.array(Mx3)
+        List of the indices of the atoms (centers) to compute the rdf for; centers[i] = index of the position of the i-th center in
+        pos.
+    coords: list
+        List of the indices of the atoms (coords) to consider for each center; coords[i,j] = index of the position of the j-th coord 
+        for the i-th center in pos. Note: if two or more centers have a different number of coords, the function will slow down!
+    V: float; default=np.linalg.det(cell)
+        volume of the box to use to renormalize the rdf
+    nbins: int; default=100
+        number of x-values of the rdf. Beware: too big nbins will lead to errors!
+    cutoff: float; default= the minimum distance between the center of the cell and the surface. 
+    Returns
+    -------
+    rdf_at: np.array(Nxnbins)
+        radial distribution functions for each center, considering the respective coords
+    bincs: np.array(nbins)
+        x-values of the rdf
+    cutoff: float
+        cutoff used for the rdf (it should close to the last element of bincs)
+    '''
+
+    
+    
+    # type checks
+    if not isinstance(cell, type(np.array([]))):
+        raise TypeError('cell must be a 3x3 numpy array!')
+    elif not cell.shape == np.ones((3,3)).shape:
+        raise TypeError('cell must be a 3x3 numpy array!')
+    elif np.linalg.det(cell) == 0:
+        raise ValueError('the cell axes are not linearly indendent!')
+
+    if not isinstance(pos, type(np.array([]))):
+        raise TypeError('pos must be a numpy array!')
+    elif len(pos.shape) != 2 or pos.shape[1] != 3:
+        raise TypeError('pos elements must be 1x3 numpy arrays!')
+
+    if not isinstance(centers, type(np.array([]))):
+        raise TypeError('centers must be a numpy array!')
+
+    if not isinstance(coords, list) or not all([isinstance(x, list) for x in coords]):
+        raise TypeError('coords must be a list of lists!')
+    elif not all([isinstance(x, int) for y in coords for x in y]):
+        raise TypeError('coords must be a list of lists of integers!')
+
+    # let's define the maximum cutoff (it will be then compared to the maximum atomic distance)
+    max_cutoff = min_distance_to_surface(cell)
+    if cutoff == None:
+            cutoff = max_cutoff
+    elif cutoff > max_cutoff:
+        print('Warning: you set a cutoff that is bigger than half of the box. To determine it automatically, do not pass any cutoff')
+    cutoff *= 1.00001 # needed for numerical reasons
+    
+    # we need the reduced coordinates
+    rpos = np.linalg.inv(cell.T) @ pos.T
+    rpos = rpos.T # Nx3
+    
+    if V is None:
+        V = abs(np.linalg.det(cell))
     
     
     
+    cell_n = np.linalg.norm(cell, axis=1) # auxiliary variable with the lenghts of the axes
     
+    ncenters = len(centers)
+    ncoords = np.array([len(x) for x in coords])
+
+    if (ncoords == ncoords[0]).all():
+
+        # do you want to understand the following expression? Go to the end of the function, then.
+        D = np.linalg.norm(np.transpose(cell @ np.transpose(mic_sign(rpos[centers, None, :] - rpos[coords]), (0, -1, -2)), (0, -1, -2)), axis=2)
+        #D = np.linalg.norm(mic(rpos[:, None, :] - rpos[coords]) @ cell, axis=2)
+        
+        # let's get the density
+        rho = ncoords[0] / V # for each center, the number of coordinants is the same, so this formula holds for any center
+    
+        # BINNING
+        # let's create the bin centers
+        
+        #cutoff = min(D.max(), max_cutoff) * 1.00001 # Ensure cutoff doesn't exceed half the box size; the scaling is
+                                                    
+        step = cutoff / nbins
+        bincs = np.array(range(0,nbins)) * step + step/2 
+        
+        # let's create the bin volumes
+        binvs = (4/3) * np.pi * ((bincs + step/2)**3 - (bincs - step/2)**3)
+    
+        rdf_at = np.zeros((ncenters, len(bincs))) # initialize the rdf for all the centers
+        for i in range(D.shape[0]): # loop over the atoms
+            # let's turn each element of the row into the respective nearest element in the bin centers
+            indices = np.floor((np.extract(D[i]<cutoff, D[i]) - step/2) / step + 0.5).astype(int)
+            approx = bincs[indices]
+            for j in range(len(bincs)):
+                rdf_at[i,j] += (indices == j).sum()
+        # now rdf_at contains the rdf for each atom
+        rdf_at /= binvs * rho
+    
+        #return rdf_at, bincs, cutoff
+        
+    else:
+        # first create a set of unique number of coords
+        set_nums = list(set([len(x) for x in coords]))
+        set_nums.sort()
+        center_groups = []
+        for set_num in set_nums:
+            center_group = []
+            for i, ncoord in enumerate(ncoords):
+                #print(f'ncoord= {ncoord}, set_num= {set_num}')
+                if ncoord == set_num:
+                    center_group.append(i)
+            center_group = np.array(center_group, dtype='int')
+            center_groups.append(center_group)
+
+        rdf_collection = []
+        for center_group in center_groups:
+            res, bincs, cutoff = rdf(cell, pos, centers[center_group], [coords[i] for i in center_group], V=None, nbins=100)
+            rdf_collection.append(res)
+        rdf_collection = np.vstack(rdf_collection)   
+        flat_center_groups = np.concatenate(center_groups)  # now here we have the indices of the centers in the same order as in rdf_collection
+        sort_indices = np.argsort(flat_center_groups)
+        rdf_at = rdf_collection[sort_indices]
+    if clip_autocorr == True:
+        rdf_at[:,0] = 0
+            # bincs and cutoff that will be returned are those from the last iteration of the for loop
+        
+    # Before returning let's break down the hell broadcasting used to generate D
+    # Let's start by taking rpos[coords]: it has shape (ncenters, ncoords, 3) and for each center there is a row for each 
+    # coordinating atom (coord) and for each coord there are three reduced coordinates (hence a vector). 
+    # We need to subtract each vector associated to a single center to that center's rpos. So we take rpos[centers], which has shape
+    # (ncenters,3) and subtract to it rpos[coords]. In terms of shapes: (ncenters,3) - (ncenters, ncoords, 3). Following the broadcasting
+    # rules of numpy, the last two dimensions are mapped between the two arrays, while for the third one (from right), a 1 
+    # is assumed for the first shape. The operation now would be: (1,ncenters,3) - (ncenters,ncoords,3). The dimensions do not correspond.
+    # In order to solve this, we need to change the shape from (1, ncenters, 3) to (ncenters, 1, 3). This way, in the second dimension
+    # the elements are duplicated as many times as needed to perform the subtraction. Namely, rpos[centers][i,j] = rpos[centers][i,j+1]...
+    # To do so, we need to add a dimension in the middle of rpos[centers] ---> rpos[centers][:, None, :]. Now this has a shape that will be
+    # correctly broadcasted. 
+    # Now that the operation rpos[centers][:, None, :] - rpos[coords] has the proper shape: (ncenters, 1, 3) - (ncenters, ncoords, 3),
+    # we obtain an array of distances between the centers and their respective coords, having shape (ncenters, ncoords, 3).
+    # We need to apply the mininum image convention to them, hence we pass them to the mic() function (it's simple enough to not deserve
+    # an explanation). So far the instruction is:
+    #     mic(rpos[centers][:, None, :] - rpos[coords])
+    # This gives us a similar array with the same shape (ncenters, ncoords, 3), the only difference is in the actual numbers inside.
+    # Now we need to convert them to cartesian coordinates (before getting the norm).
+    # The matrix formula to convert a vector from the reduced basis to the cartesian one is x_c = cell @ x_r, where cell[i,j] is the
+    # i-th cartesian component of the j-th unit vector, and both x_c and x_r are column vectors, hance have shape (3,1).
+    # In our case both cell and the vectors are transposed, so we need*** to transpose both before multiplying, multiply them and then
+    # re-transpose the result. To transpose the cell we just write cell.T, to transpose the distance vectors, we need to use the np.transpose
+    # function, as the vectors are themselved inside arrays. Remember that the distance array now has shape (ncenters, ncoords, 3);
+    # we need to transpose each matrix defined by the last two indices, hence we have to swap the last two dimensions.
+    # We do it by using np.transpose(distance_vector, (0, -1, -2)).
+    # The instruction so far is:
+    #     cell.T @ np.transpose(mic(rpos[centers][:, None, :] - rpos[coords]), (0, -1, -2))
+    # The result has the shape (ncenters, 3, ncoords), and we need to re-transpose it to take it back to the previous form:
+    #     np.transpose(cell.T @ np.transpose(mic(rpos[centers][:, None, :] - rpos[coords]), (0, -1, -2)), (0, -1, 2))
+    # Now we have a (ncenters, ncoords, 3) array with the distance vectors in cartesian coordinates and we just need to get the norm.
+    #     np.linalg.norm(np.transpose(cell.T @ np.transpose(mic(rpos[centers][:, None, :] - rpos[coords]), (0, -1, -2)), (0, -1, 2)), axis=2)
+    # where we asked to compute the norm on the last axis.
+    # That's it!
+
+    # ***In principle we can avoid the transposition, indeed since both the cell and the vectors are transposed, we can just invert the order
+    # in the multiplication. In this case the final instruction would be shorter and simpler:
+    #     np.linalg.norm(mic(rpos[:, None, :] - rpos[coords]) @ cell, axis=2)
+    # however, for some reason it is slower.
+    
+    return rdf_at, bincs, cutoff
+    
+
+def rdf_ase_elems(atoms, 
+                  center_elements='all', 
+                  coord_elements='all',
+                  nbins=100,
+                  cutoff='auto-equal', 
+                  V=None,
+                  clip_autocorr=True, 
+                  plot=True,
+                  fig_dir='./figs/',
+                  save_plots=True,
+                  fig_dpi=600,
+                  make_movies=True,
+                  movie_fps=5,
+                  movie_dpi=200,
+                  movie_titles=None):
+
+    # AUXILIARY FUNCTIONS
+    def wipe(x):
+        del x
+    def get_common_cutoff(atoms):
+        pass
+        
+    def get_common_elements(atoms):
+        common_elements = []
+        elems = [np.unique(at.get_atomic_numbers()) for at in atoms]
+        return reduce(np.intersect1d, elems)
+
+    def check_coord_key(key):
+        if isinstance(key, str):
+            try:
+                key = ase_atnums[lc(key)]
+            except KeyError:
+                return False
+            except:
+                raise ValueError('Something is wrong in coord_elements, please check it!')
+        elif isinstance(key, (int, np.int64)):
+            if key < 1 or key > 118:
+                return False
+        else:
+            return False
+        return True
+
+    def transform_str_to_int(dictionary):
+        for key in list(dictionary.keys()):
+            if isinstance(key, str):
+                try:
+                    new_key = ase_atnums[lc(key)]
+                    dictionary[new_key] = dictionary[key]
+                except KeyError:
+                    pass
+                except:
+                    raise ValueError('Something is wrong in coord_elements, please check it!')
+                dictionary.pop(key)
+            elif isinstance(key, (int, np.int64)):
+                if key < 1 and key > 118:
+                    dictionary.pop(key)
+            else:
+                dictionary.pop(key)
+                    
+
+                    
+
+    def check_and_format_coord_value(value):
+        chk = 0
+        if isinstance(value, str):
+            if value == 'all':
+                new_value = common_elements
+            else:
+                try:
+                    new_value = [ase_atnums[lc(value)]]
+                except KeyError:
+                    new_value = []
+                    print(f'WARNING: uknown element {value}')
+                    chk = 1
+                except:
+                    raise ValueError('There is something wrong in coord_elements, please check it!')
+        elif isinstance(value, (list,np.ndarray)):
+            new_value = []
+            for item in value:
+                if isinstance(item, str):
+                    try:
+                        new_value.append(ase_atnums[lc(item)])
+                    except KeyError:
+                        chk = 1
+                elif isinstance(item, (int, np.int64)):
+                    if  0 < item <= 118:
+                        new_value.append(item)
+                    else:
+                        chk = 1
+                else:
+                    raise TypeError('coord_elements must be a dictionary and its values must be lists|arrays of str or int!')
+        return np.array(new_value), chk
+                    
+                
+                
+    #####################
+
+    ct = time()
+
+    # input check
+    if not isinstance(atoms, list):
+        if isinstance(atoms, Atoms):
+            atoms = [atoms]
+    elif not all([isinstance(x, Atoms) for x in atoms]):
+        raise TypeError('atoms must be an (or a list of) ase.atoms.Atoms object(s)!')
+        
+    if cutoff == 'auto':
+        cutoff = None
+    elif cutoff == 'auto-equal':
+        cutoff = get_common_cutoff(atoms)
+    elif not isinstance(cutoff, float) or (not isinstance(cutoff, list) and len(cutoff)==len(atoms) and all([isinstance(x, float) for x in cutoff])):
+        raise TypeError('cutoff must be a float (if only one Atoms object was given) or a list with a float for each Atoms object')
+
+    
+    # let's get a list of sets of the elements present in each structure
+    atomic_numbers = [at.get_atomic_numbers() for at in atoms]
+    
+    common_elements = get_common_elements(atoms) # time consuming for long trajectories
+
+        # check on center_elements
+    if center_elements == 'all':
+        center_elements = common_elements
+    elif not isinstance(center_elements, (list,np.ndarray)):
+        # if it's not a list|array and not 'all'
+        if isinstance(center_elements, (int, np.int64)):
+            center_elements = np.array([center_elements])
+        elif isinstance(center_elements, str):
+            center_elements = np.array([ase_atnums[lc(center_elements)]])
+        else:
+            # if it's not a list|array nor 'all', nor an int nor a string
+            raise TypeError('center_elements must be a int, a string, or list|array of int or str!')
+    #print(center_elements, [isinstance(x, (int, np.int64)) for x in center_elements])       
+    if not all([isinstance(x, (int, np.int64)) for x in center_elements]):
+        # if it is a list|array but not all the elements are int
+        if all([isinstance(x, str) for x in center_elements]):
+            center_elements = [ase_atnums[x] for x in lc(center_elements)]
+        else:
+            raise TypeError('all entries of center_elements must be of the same type (either int -atomic numbers- or str -chemical symbol-!')
+           
+        # we are sure now center_elements is a list|array and all elements are int
+    center_elements = np.unique(center_elements)
+    #print(center_elements, common_elements)
+    if not all(np.in1d(center_elements, common_elements)):
+        # if it is a list|array and all the elements are int but there are chemical elements not in common
+        raise ValueError('center_elements must only contain elements that are in common between all the structures!')
+    else:
+        # if it is a list|array and all the elements are int and represent chemical elements in common (good case)
+        pass
+            
+
+        # check on coord_elements
+    if coord_elements == 'all':
+        coord_elements = dict()
+        for center_element in center_elements:
+            coord_elements[center_element] = common_elements
+    elif not isinstance(coord_elements, dict):
+        # if it's not 'all' nor a dictionary
+        raise TypeError('coord_elements must be either a dictionary or \'all\'!')
+    copy_coord_elements = coord_elements.copy()
+        # we know now coord_elements is a dictionary
+    [coord_elements.pop(key) for key in list(coord_elements.keys()) if not check_coord_key(key)]
+        # if there are str in coord_elements' keys, they all are a chemical symbol, hence they still need to be converted into atomic number
+    transform_str_to_int(coord_elements) 
+    # now only atomic numbers are present as keys in coord_elements
+    # We need to check wether there is a coord_elements key for each central element
+    if not all(np.in1d(center_elements, list(coord_elements.keys()))):
+        raise ValueError('You must provide a list of coords for each center element!')
+    # We need to make sure only center_elements are among the keys
+    len2 = len(coord_elements)
+    [coord_elements.pop(key) for key in list(coord_elements.keys()) if key not in center_elements]
+
+    # Now we need to check the values of the dictionary
+    chks = []
+    for key in list(coord_elements.keys()):
+        #value = coord_elements[key]
+        coord_elements[key], chk = check_and_format_coord_value(coord_elements[key])
+        chks.append(chk)
+
+    condition1 = len2 != len(copy_coord_elements.keys())
+    condition2 = np.sum(chks) != 0
+                                                   
+    if condition1 and not condition2:
+        print('WARNING: some coord_elements entry\'s key could not be associated to any atom, so it was ignored.')
+        print(f'Given coord_elements:\n{copy_coord_elements}')
+        print(f'Actual coord_elements:\n{coord_elements}')
+
+    if condition1 and condition2:
+        print('WARNING: some coord_elements entry\'s key could not be associated to any atom, so it was ignored.')
+        print('Moreover, some coord_elements entry\'s value had one or more elements that could not be associated to any atom, so it/they was/were ignored too.')
+        print(f'Given coord_elements:\n{copy_coord_elements}')
+        print(f'Actual coord_elements:\n{coord_elements}')
+        
+        
+    if condition2 and not condition1:
+        print('WARNING: some coord_elements entry\'s value had one or more elements that could not be associated to any atom, so it/they was/were ignored')
+        print(f'Given coord_elements:\n{copy_coord_elements}')
+        print(f'Actual coord_elements:\n{coord_elements}')
+        print(f'chks: {chks}')
+
+    del chks, chk
+
+    # now center_elements is a list of unique centers (capitalized) and coord_elements is a dictionary with a list of capitalized
+    # elements for each center
+
+    coll_RDFs = []
+    coll_RDFs_tot = []
+    coll_bincs = []
+    coll_cutoff = []
+    coll_rdf_at = []
+    for i, atomic_nums in enumerate(atomic_numbers):
+        
+        centers = []
+        pairs = []
+        coords = []
+
+        center_atoms = [] # indices of the center atoms 
+        for center_element in center_elements:
+            to_extend1 = np.where(atomic_nums == center_element)[0]
+            center_atoms.extend(to_extend1)
+            #centers.extend(to_extend1)
+
+        for j, center_atom in enumerate(center_atoms):
+            curr_center_atom_atnum = atomic_nums[center_atom]
+            curr_center_atom_coords = coord_elements[curr_center_atom_atnum]
+            for curr_center_atom_coord in curr_center_atom_coords:
+                centers.append(center_atom)
+                curr_center_atom_coord_atoms = np.where(atomic_nums == curr_center_atom_coord)[0]
+                pairs.append((curr_center_atom_atnum, curr_center_atom_coord, j, len(curr_center_atom_coord_atoms)))
+                coords.append(curr_center_atom_coord_atoms)
+    
+        centers = np.array(centers)
+        coords = [x.tolist() for x in coords]
+
+        # centers is an array with the indices of the atoms that will be used as centers
+        # coords is a list of lists, where for each center atom, there is a list with the indices of all the coords. atoms for it
+        # pairs is a list of fourples: (atomic number of the center, atomic number of the coords (all the same), index of the center atom, number of coord. atoms)
+        
+        rdf_at, bincs, cutoff = rdf(cell = np.array(atoms[i].get_cell()), 
+                                    pos = atoms[i].get_positions(), 
+                                    centers = centers, coords=coords,
+                                    V = V,
+                                    nbins = nbins,
+                                    cutoff = cutoff,
+                                    clip_autocorr = clip_autocorr)
+
+        elem_pairs = []
+        RDFs = [] # order: pairs
+        RDFs_tot = [] # order: center_elements
+
+        N = np.array([x[3] for x in pairs]) # how many coords for each center_atom-related rdf
+        unique_center_atoms = set(center_atoms) # a list with the indices of the center atoms
+        rdf_tot_at = []
+        unique_center_names = [ase_chemsym[atomic_nums[unique_center_atom]] for unique_center_atom in unique_center_atoms]
+        for j, unique_center_atom in enumerate(unique_center_atoms):
+            indices = np.array([j for j, center_atom in enumerate(center_atoms) if center_atom == unique_center_atom])
+            rdf_tot_at.append(np.average(rdf_at[indices], axis=0, weights=N[indices])) # we average all the rdf that whose center is 
+                                                                                       # the unique_center_atom; the average is weighted by the
+                                                                                       # number of coords of each rdf
+        rdf_tot_at = np.array(rdf_tot_at) # this contains the total rdf for each center atom (total = with all of the coords chosen for its elem) 
+        
+        RDFs_tot_center_elems = []
+        
+        for center_element in center_elements: # center elements = list of the elems used as centers
+            center_name = ase_chemsym[center_element]
+            for coord_element in coord_elements[center_element]: # scan its coords elems.
+                coord_name = ase_chemsym[coord_element]
+                curr_pair = (center_element, coord_element) # create the pair
+                elem_pairs.append(curr_pair)
+                # let's get the indices of pairs that are equal to the current one; those indices are also the indices of the respective
+                # rdf to average
+                rdf_to_average = []
+                for j in range(len(rdf_at)):
+                    if pairs[j][:2] == curr_pair: # pairs: (at. num. of the center, at. num. of the coords (all =), 
+                                                  # index of center atom, number of coord. atoms) - for each rdf
+                        rdf_to_average.append(j)
+                RDFs.append([(center_name, coord_name), rdf_at[rdf_to_average].mean(axis=0)])
+            
+            # total
+            
+            indices = [j for j, unique_center_name in enumerate(unique_center_names) if unique_center_name == center_name]
+            #return unique_center_names, center_name
+            RDFs_tot.append([(center_name), rdf_tot_at[indices].mean(axis=0)])
+
+        if plot == True:
+            for RDF in RDFs:
+                plt.figure()
+                ce = RDF[0][0]
+                co = RDF[0][1]
+                plt.title(f'g$_{{{ce}-{co}}}$(r); center: {ce}   coord.: {co}')
+                plt.plot(bincs, RDF[1])
+                plt.xlabel('Distance, r ($\mathrm{\AA}$)')
+                plt.ylabel('Probability density, g')
+                if save_plots == True:
+                    fig_dir = Path(fig_dir)
+                    if not fig_dir.is_dir():
+                        fig_dir.mkdir(parents=True, exist_ok=True)
+                    plt.savefig(fig_dir.joinpath(f'{ce}-{co}_{i}.png'), format='png', bbox_inches='tight', dpi=fig_dpi)
+            
+            for RDF_tot in RDFs_tot:
+                plt.figure()
+                ce = RDF_tot[0]
+                plt.title(f'g$_{{{ce}}}$(r)')
+                plt.plot(bincs, RDF_tot[1])
+                plt.xlabel('Distance, r ($\mathrm{\AA}$)')
+                plt.ylabel('Probability density, g')
+                if save_plots == True:
+                    fig_dir = Path(fig_dir)
+                    if not fig_dir.is_dir():
+                        fig_dir.mkdir(parents=True, exist_ok=True)
+                    plt.savefig(fig_dir.joinpath(f'{ce}_{i}.png'), format='png', bbox_inches='tight', dpi=fig_dpi)
+
+        coll_RDFs.append(RDFs)
+        coll_RDFs_tot.append(RDFs_tot)
+        coll_bincs.append(bincs)
+        coll_cutoff.append(cutoff)
+        coll_rdf_at.append(rdf_at)
+
+    if make_movies == True:
+        fig_dir = Path(fig_dir)
+        if not fig_dir.is_dir():
+            fig_dir.mkdir(parents=True, exist_ok=True)
+            
+        if movie_titles is None:
+            movie_titles = [f'{x}' for x in range(1, len(coll_RDFs)+1)]
+            
+        # partial
+        unique_pairs = [x[0] for x in coll_RDFs[0]]
+        
+        RDFs_per_pair = []
+        for i, unique_pair in enumerate(unique_pairs):
+            RDFs_per_pair.append([RDF[i][1] for RDF in coll_RDFs])   
+        RDFs_per_pair = np.array(RDFs_per_pair) # parallel with unique_pairs
+        
+        
+        
+        for i, RDFs in enumerate(RDFs_per_pair):
+            cutoff = np.array(coll_cutoff).min()
+            fig = plt.figure()
+            l, = plt.plot([],[])
+            plt.xlim(0, cutoff)
+            plt.ylim(0, RDFs[1:].max())
+            plt.xlabel('Distance, r ($\mathrm{\AA}$)')
+            plt.ylabel('Probability density, g')
+            meta_title = f'{unique_pairs[i]}'
+            meta_artist = f'The little painter elf inside the box'
+            metadata = dict(title=meta_title, artist=meta_artist)
+            writer = PillowWriter(fps=movie_fps, metadata=metadata)
+            figname = fig_dir.joinpath(f'{unique_pairs[i][0]}-{unique_pairs[i][1]}.gif').absolute()
+            with writer.saving(fig, figname, movie_dpi):
+                for j, RDF in enumerate(RDFs): # parallel with bincs, ats etc...
+                    l.set_data(coll_bincs[j], RDF)
+                    plt.title(f'g$_{{{unique_pairs[i][0]}-{unique_pairs[i][1]}}}$(r); - {movie_titles[j]}')
+                    writer.grab_frame()
+        
+        # total
+        unique_centers = [x[0] for x in coll_RDFs_tot[0]]
+        
+        RDFs_tot_per_center = []
+        for i, unique_center in enumerate(unique_centers):
+            RDFs_tot_per_center.append([RDF_tot[i][1] for RDF_tot in coll_RDFs_tot])
+        RDFs_tot_per_center = np.array(RDFs_tot_per_center) # parallel with unique_centers
+        
+        for i, RDFs_tot in enumerate(RDFs_tot_per_center):
+            cutoff = np.array(coll_cutoff).min()
+            fig = plt.figure()
+            l, = plt.plot([],[])
+            plt.xlim(0, cutoff)
+            plt.ylim(0, RDFs_tot[1:].max())
+            plt.xlabel('Distance, r ($\mathrm{\AA}$)')
+            plt.ylabel('Probability density, g')
+            meta_title = f'{unique_centers[i]}'
+            meta_artist = f'The little painter elf inside the box'
+            metadata = dict(title=meta_title, artist=meta_artist)
+            writer = PillowWriter(fps=movie_fps, metadata=metadata)
+            figname = fig_dir.joinpath(f'{unique_centers[i]}.gif')
+            with writer.saving(fig, figname, movie_dpi):
+                for j, RDF_tot in enumerate(RDFs_tot): # parallel with bincs, ats etc...
+                    l.set_data(coll_bincs[j], RDF_tot)
+                    plt.title(f'g$_{{{unique_centers[i]}}}$(r) - {movie_titles[j]}')
+                    writer.grab_frame()
+            
+        
+        
+    return coll_RDFs, coll_RDFs_tot, coll_bincs, np.array(coll_cutoff), coll_rdf_at
     
     
     

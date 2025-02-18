@@ -148,25 +148,18 @@ def warn(text):
     '''
     warnings.warn(text)
     
-def flatten(l=None):
-    '''
-    This functions flattens nested lists.
-    Parameters:
-    l (list): list to flatten
-    Returns:
-    res (list): list containing the elements of the list listed along a single axis.
-    '''
+def flatten(l):
+    """Recursively flattens a nested list."""
     if not isinstance(l, list):
         raise TypeError("The object given is not a list!")
+    
     res = []
     for x in l:
-        if isinstance(x, list) and len(x) > 1:
-            res.extend(flatten(x))
+        if isinstance(x, list):
+            res.extend(flatten(x))  # Always recursively flatten lists
         else:
-            if isinstance(x, list):
-                res.append(x[0])
-            else:
-                res.append(x)
+            res.append(x)  # Append non-list elements directly
+    
     return res
 
 def vec_diff_eval(vec1, vec2, rad_tol, ang_tol, zero_diff=0.001, dot_round=5):
@@ -604,3 +597,17 @@ def mic_sign(vec):
     vec must be in reduced coordinates, np.arrays
     '''
     return vec - np.round(vec)
+
+
+def lc(l):
+    '''
+    Transforms a string (or strings of list recursively, if l is a list) into lower-case and capitalized strings
+    e.g. lc([['lo', 'oO'], 'ciao', ['pp']]) -----> [['Lo', 'Oo'], 'Ciao', ['Pp']]
+    '''
+    if isinstance(l, list):
+        ll = []
+        for item in l:
+            ll.append(lc(item))    
+    else:
+        ll = l.lower().capitalize()
+    return ll

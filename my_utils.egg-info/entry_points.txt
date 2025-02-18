@@ -1,3 +1,4 @@
 [console_scripts]
 atlen = my_utils.utils:atlen
 make_md = my_utils.utils_md:make_md
+wrap = my_utils.utils_md:wrap
