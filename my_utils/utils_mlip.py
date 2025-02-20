@@ -25,13 +25,14 @@ from subprocess import run
 
 
 
-def plot_correlations(dtset_ind, ind, dir='', offsets=None, save=False):
+def plot_correlations(dtset_ind, ind, dir='', offsets=None, save=False, units=None):
     '''
     This function plot the correlation graphs for energy, forces and stress,
     Parameters:
     dtset_ind (int): 0 for test set, 1 for training set
     ind (int): 0 for energy, 1 for forces, 2 for stress
     dir (str): path of the directory where the comparison files are
+    
     '''
     if dir is not None:
         dir = Path(dir)
@@ -39,7 +40,8 @@ def plot_correlations(dtset_ind, ind, dir='', offsets=None, save=False):
     #dtset_ind = 0
     # order: 0=energy, 1=forces, 2=stress
     names = ['energy', 'forces', 'stress']
-    units = ['eV/at', 'ev/$\mathrm{\AA}$', 'GPa']
+    if units == None:
+        units = ['eV/at', 'ev/$\mathrm{\AA}$', 'eV/Angst^2']
     file_names = [dir.joinpath(f'{dtset_used[dtset_ind]}-{cap_first(x)}_comparison.dat') for x in names]
     if offsets is None:
         #offsets = [35, 1.8, 1] # negative offset of the y position of the text box 
@@ -433,7 +435,7 @@ def make_comparison(is_ase1=True,
         the output file will be named [outfile_pref][Property]_comparison.dat 
         (if make_file=True) e.g.: with outfile_pref = 'MLIP-', for the energy 
         the name would be: MLIP-Energy_comparison.dat 
-    units: dict, default: {'energy': 'eV/at', 'forces':'eV/Angs', 'stress':'GPa'}
+    units: dict, default: {'energy': 'eV/at', 'forces':'eV/Angs', 'stress':'eV/Angst^2'}
         dictionary with key-value pairs like prop-unit with prop in 
         ['energy', 'forces', 'stress'] and value being a string with the unit
         to print for the respective property. If None, the respective units
@@ -484,7 +486,7 @@ def make_comparison(is_ase1=True,
         props =  ['energy', 'forces', 'stress']
     
     if units == None:
-        units = dict(energy='eV/at', forces='eV/Angst', stress='GPa')
+        units = dict(energy='eV/at', forces='eV/Angst', stress='eV/Angst^2')
         
     prop_numbs = dict(energy = 0, forces = 1, stress = 2)
     
@@ -552,7 +554,8 @@ def train_pot_tmp(mlip_bin,
                   train_set_path,
                   dir,
                   params,
-                  mpirun=''):
+                  mpirun='',
+                  final_evaluation=True):
     '''Function to train the MTP model, analogous to train_pot, but the init.mtp file is created by asking the level
     
         Parameters
@@ -670,9 +673,32 @@ def train_pot_tmp(mlip_bin,
     err_path =dir.joinpath('err_train')
     with open(log_path.absolute(), 'w') as log, open(err_path.absolute(), 'w') as err:
         run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)
-    set_level_to_pot_file(trained_pot_file_path=dir.joinpath(params['trained_pot_name']).absolute(), mtp_level=mtp_level)    
+    set_level_to_pot_file(trained_pot_file_path=dir.joinpath(params['trained_pot_name']).absolute(), mtp_level=mtp_level)
+    
+    if final_evaluation == True:
+        eval_dir = dir.joinpath('evaluation')
+        if not eval_dir.is_dir():
+            eval_dir.mkdir(parents=True, exist_ok=True)
+        calc_efs(mlip_bin.absolute(),
+                 mpirun=mpirun, 
+                 confs_path=train_set_path.absolute(),
+                 pot_path=trained_pot_path,
+                 out_path='ML_dataset.cfg',
+                 dir=eval_dir.absolute())
         
-def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun=''):
+        make_comparison(is_ase1=False,
+                        is_ase2=False,
+                        structures1=None, 
+                        structures2=None, 
+                        file1=train_set_path.absolute(),
+                        file2=eval_dir.joinpath('ML_dataset.cfg').absolute(),
+                        props='all', 
+                        make_file=True, 
+                        dir=eval_dir,
+                        outfile_pref='MLIP', 
+                        units=None)
+        
+def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun='', final_evaluation=True):
     '''
     Function to train the MTP model
     Arguments:
@@ -748,10 +774,35 @@ def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun=''):
     err_path = dir.joinpath('err_train')
     with open(log_path.absolute(), 'w') as log, open(err_path.absolute(), 'w') as err:
         run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)
-    set_level_to_pot_file(trained_pot_file_path=dir.joinpath(params['trained_pot_name']).absolute(), mtp_level=mtp_level)
+    trained_pot_path = dir.joinpath(params['trained_pot_name']).absolute()
+    set_level_to_pot_file(trained_pot_file_path=trained_pot_path, mtp_level=mtp_level)
+
+    if final_evaluation == True:
+        eval_dir = dir.joinpath('evaluation')
+        if not eval_dir.is_dir():
+            eval_dir.mkdir(parents=True, exist_ok=True)
+        calc_efs(mlip_bin.absolute(),
+                 mpirun=mpirun, 
+                 confs_path=train_set_path.absolute(),
+                 pot_path=trained_pot_path,
+                 out_path='ML_dataset.cfg',
+                 dir=eval_dir.absolute())
+        
+        make_comparison(is_ase1=False,
+                        is_ase2=False,
+                        structures1=None, 
+                        structures2=None, 
+                        file1=train_set_path.absolute(),
+                        file2=eval_dir.joinpath('ML_dataset.cfg').absolute(),
+                        props='all', 
+                        make_file=True, 
+                        dir=eval_dir,
+                        outfile_pref='MLIP', 
+                        units=None)
+            
 
 
-def train_pot_from_ase(mlip_bin, init_path, train_set, dir, params, mpirun=''):
+def train_pot_from_ase(mlip_bin, init_path, train_set, dir, params, mpirun='', final_evaluation=True):
     '''
     Function to train the MTP model
     Arguments:
@@ -794,7 +845,8 @@ def train_pot_from_ase(mlip_bin, init_path, train_set, dir, params, mpirun=''):
               train_set_path=cfg_path.absolute(), 
               dir=dir.absolute(),
               params=params,
-              mpirun=mpirun)
+              mpirun=mpirun,
+              final_evaluation=final_evaluation)
     
 def train_pot_from_ase_tmp(mlip_bin,
                            untrained_pot_file_dir,
@@ -806,7 +858,8 @@ def train_pot_from_ase_tmp(mlip_bin,
                            train_set,
                            dir,
                            params,
-                           mpirun=''):
+                           mpirun='',
+                           final_evaluation=True):
     '''Function to train the MTP model
     
     Parameters
@@ -890,7 +943,8 @@ def train_pot_from_ase_tmp(mlip_bin,
                   train_set_path=cfg_path.absolute(), 
                   dir=dir.absolute(),
                   params=params,
-                  mpirun=mpirun)
+                  mpirun=mpirun,
+                  final_evaluation=final_evaluation)
     
 
 def pot_from_ini(fpath):
