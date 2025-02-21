@@ -835,7 +835,7 @@ def check_convergence_kfold(increase_step,
     expl += "\n- dt_sizes: a list with the size of the total datasets used in each crossvalidation;"
     expl += "\n- res: contains for each iteration two elements: errs_train and errs_test as they are output by mlp.make_comparison"
     expl += "\n\t its shape is: "
-    expl += "\n\t\t(n_iteration, n_set_types, n_properties, n_metrics, n_folds)
+    expl += "\n\t\t(n_iteration, n_set_types, n_properties, n_metrics, n_folds):
     expl += "\n\t and these are the dimensions:"
     expl += "\n\t\t1-iteration; 2-[training set, test set]; 3-dict['energy', 'forces', 'stress']; 4-[rmse, mae, r2]; 5-fold;"
     expl += "\n- meta: a list of two elements: (i) the parameters that were passed to the function when it was launched last time, "
