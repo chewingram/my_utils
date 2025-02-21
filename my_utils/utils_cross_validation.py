@@ -1,14 +1,5 @@
-import numpy as np
 import os
 import sys
-from .utils import setup_logging, mute_logger, data_reader, space, path, inv_dict, mae, rmse, R2, cap_first, low_first
-from . import utils_mlip as mlp
-import random as rnd
-from ase.io import read, write
-import shutil
-import pickle as pkl
-from matplotlib import pyplot as plt
-import matplotlib
 from subprocess import run
 import subprocess
 from copy import deepcopy as cp
@@ -16,6 +7,23 @@ from pathlib import Path
 from math import ceil
 import logging
 import datetime
+import inspect
+import shutil
+import pickle as pkl
+import random as rnd
+
+from matplotlib import pyplot as plt
+import matplotlib
+
+import numpy as np
+
+from .utils import setup_logging, mute_logger, data_reader, space, path, inv_dict, mae, rmse, R2, cap_first, low_first
+from . import utils_mlip as mlp
+
+from ase.io import read, write
+
+
+
 
 def kfold_ind(size, k):
     '''
@@ -455,7 +463,7 @@ def cross_validate_kfold(nfolds,
         train_params['train_set'] = train_set
         train_params['mlip_bin'] = mlip_bin
         train_params['mpirun'] = mpirun
-        
+
         if 'val_cfg' in train_params.keys(): del train_params['val_cfg']
         
         l1.info(f'  -About to begin the training phase')
@@ -621,7 +629,8 @@ def check_convergence_kfold(increase_step,
                             logging=True, 
                             logger_name=None,
                             logger_filepath='convergence.log', 
-                            debug_log=False):
+                            debug_log=False,
+                            check_for_restart=False):
     '''This function checks if a dataset is converged with a specified MTP model.
     
     It is assumed that the order in the dataset is the same of the hypotetical convergence, in other words, 
@@ -702,19 +711,91 @@ def check_convergence_kfold(increase_step,
          if a new logger is created (preexisting_logger_name = None), then activate debug logging
     
     '''
+
+    ### AUXILIARY FUNCTIONS ###
+    def find_new_path(path):
+        parent = path.parent
+        name = path.name[:-4] # exclude the extension and dot
+        j = 0
+        i = 0
+        while i == 0:
+            new_path = parent.joinpath(f'{name}_{j}.pkl')
+            if new_path.is_file():
+                j += 1
+            else:
+                break
+        return new_path
+    ###########################
     
     if logging == True:
         # set logger
         l1 = setup_logging(logger_name=logger_name, log_file=logger_filepath, debug=debug_log)
     else:
         l1 = mute_logger()
+
+    dt_sizes = [] 
+    res = []
+    n_iterations_done = 0
     
+    tmp = [x for x in inspect.signature(check_convergence_kfold).parameters]
+    parameters = {x:y for x,y in [(z,w) for z,w in locals().items() if z in tmp]}
     
-    l1.info('Evaluation of the convergence of dataset started at ' + datetime.datetime.now().strftime("%d %b %Y - %H:%M:%S"))
+    results_filepath = Path('./kfold_convergence_results.pkl')
+    
+    if check_for_restart == True:
+        if not results_filepath.is_file():
+            msg = f'No restarting point (e.g. file named kfold_convergence_results.pkl) found in {results_filepath.parent}\n'
+            l1.info(msg)
+            is_restart = False  
+        else:
+            with open(results_filepath.absolute(), 'rb') as fl:
+                restart_file = pkl.load(fl)
+            dt_sizes = restart_file[1] # overwrite the empty lisy
+            res = restart_file[2] # overwrite the empty list
+            old_parameters = restart_file[3][0]
+            n_iterations_done = len(dt_sizes) # overwrite 0
+            old_dtsize = len(old_parameters['dataset'])
+            old_min_dtsize = old_parameters['min_dtsize']
+            old_increase_step = old_parameters['increase_step']
+            old_n_iters = int((old_dtsize-old_min_dtsize)/old_increase_step) + 1
+            if n_iterations_done < old_n_iters:
+                msg = f'A restarting point was found ({results_filepath.absolute()}) with {n_iterations_done} iteration(s) done '
+                msg += f'out of {old_n_iters}.\nThe process will be restarted from the next iteration, reusing the parameters passed to the function '
+                msg +=f'in the previous call (the new ones will be ignored).'
+                l1.info(msg)
+                is_restart = True
+                parameters = old_parameters
+            else:
+                newpath = find_new_path(results_filepath)
+                results_filepath.rename(newpath)
+                msg = f'A restarting point was found ({results_filepath.absolute()}) but it is already completed ({n_iterations_done} iterations)'
+                msg += f'\nThe file was renamed {new_path.name} and the process will be restarted from scratch.'
+                l1.info(msg)
+                is_restart = False
+                n_iterations_done = 0 # it must be given back the original value of 0
+    else:
+        is_restart = False
+
+    if is_restart == True:
+        # if it is a restart, update the variables with the new parameters (which are actually the old ones)
+        increase_step = parameters['increase_step']
+        nfolds = parameters['nfolds']
+        min_dtsize = parameters['min_dtsize']
+        mpirun = parameters['mpirun']
+        mlip_bin = parameters['mlip_bin']
+        dataset = parameters['dataset']
+        train_flag_params = parameters['train_flag_params']
+        train_params = parameters['train_params']
+        # we use the logging settings passed to the function, irrespective of any restart
+        #logging = parameters['logging']
+        #logger_name = parameters['logger_name']
+        #logger_filepath = parameters['logger_filepath'] 
+        #debug_log = parameters['debug_log']
+
+
+    l1.info('Evaluation of the convergence of dataset started on ' + datetime.datetime.now().strftime("%d %b %Y - %H:%M:%S"))
     dtsize = len(dataset)
     
-    res = []
-    dt_sizes = []
     
     if min_dtsize < 1:
         raise ValueError('min_dtsize must be greater than 0!')
@@ -729,20 +810,40 @@ def check_convergence_kfold(increase_step,
         
     n_iters = int((dtsize-min_dtsize)/increase_step) + 1 # number of iterations to run to evaluate convergence
     offset = (dtsize-min_dtsize)%increase_step
-    
-    l1.info(f'{n_iters} crossvalidations ({nfolds}-fold) will be launched')
-    l1.info(f'The dataset has {dtsize} elements. Now small datasets will be used by increasing their size by {increase_step}.')
-    if offset == 0:
-        l1.info(f'The mimimum size is {min_dtsize}')
+
+    l1.info(f'{n_iters-n_iterations_done} crossvalidations ({nfolds}-fold) will be launched')
+    l1.info(f'The dataset has {dtsize} elements. Small datasets will be used by increasing their size by {increase_step}.')
+
+    if is_restart == False:
+        if offset == 0:
+            l1.info(f'The minimum size is {min_dtsize}')
+        else:
+            msg = f'The minimum size is {min_dtsize}, but we need to include the first {offset} configuration to make the size'
+            msg += f' of the dataset a multiple of the increasing step.'
+            l1.info(msg)
     else:
-        msg = f'The minimum size is {min_dtsize}, but we need to include the first {offset} configuration to make the size'
-        msg += f' of the dataset a multiple of the increasing step.'
-        l1.info(msg)
+        if offset == 0:
+            l1.info(f'!Just for the record! - The minimum size is {min_dtsize}')
+        else: 
+            msg = f'!Just for the record! - The minimum size is {min_dtsize}, but we needed to include the first {offset} '
+            msg += f'configuration to make the size'
+            msg += f' of the dataset a multiple of the increasing step.'
+            l1.info(msg)
     
+    expl = "This file contains four elements:"
+    expl += "\n- this explanatory variable;"
+    expl += "\n- dt_sizes: a list with the size of the total datasets used in each crossvalidation;"
+    expl += "\n- res: contains for each iteration two elements: errs_train and errs_test as they are output by mlp.make_comparison"
+    expl += "\n\t its shape is: "
+    expl += "\n\t\t(n_iteration, n_set_types, n_properties, n_metrics, n_folds)
+    expl += "\n\t and these are the dimensions:"
+    expl += "\n\t\t1-iteration; 2-[training set, test set]; 3-dict['energy', 'forces', 'stress']; 4-[rmse, mae, r2]; 5-fold;"
+    expl += "\n- meta: a list of two elements: (i) the parameters that were passed to the function when it was launched last time, "
+    expl += "and (ii) the number of iterations done before finishing or being interrupted."
     
-    for i in range(n_iters):
+    for i in range(n_iterations_done, n_iters):
         msg = f'Launching the crossvalidation with structures from n. 0 to n. {offset+min_dtsize-1 + i*increase_step}'
-        msg += f' (interation n. {i+1})'
+        msg += f' (iteration n. {i+1})'
         l1.info(msg)
         
         curr_dataset = dataset[:offset+min_dtsize-1 + i*increase_step +1]
@@ -757,14 +858,14 @@ def check_convergence_kfold(increase_step,
                                         logger_name=l1.name))
         dt_sizes.append(len(curr_dataset))
         l1.info('Crossvalidation done\n')
+
+        meta = [parameters, i+1]
+        with open(results_filepath, 'wb') as fl:
+            pkl.dump([expl, dt_sizes, res, meta], fl)
+            
         
     # res shape: (n_iteration, n_set_types, n_properties, n_metrics, n_folds)
     # These are the dimensions:
     # 1-iteration; 2-[training set, test set]; 3-dict['energy', 'forces', 'stress']; 4-[rmse, mae, r2]; 5-fold
-   
-    
-    with open('kfold_convergence_results.pkl', 'wb') as fl:
-        expl = "This file contains three elements: this explanatory variable, dt_sizes and res. dt_sizes is a list with the size of the total datasets used in each crossvalidation. The latter contains for each iteration two elements: errs_train and errs_test as they are output by mlp.make_comparison. \nThe variable res shape: (n_iteration, n_set_types, n_properties, n_metrics, n_folds), and these are the dimensions:\n1-iteration; 2-[training set, test set]; 3-dict['energy', 'forces', 'stress']; 4-[rmse, mae, r2]; 5-fold"
-        pkl.dump([expl, dt_sizes, res], fl)
         
     plot_convergence_stuff(res, dt_sizes, dir='Convergence_figures/')

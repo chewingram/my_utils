@@ -8,7 +8,7 @@ import numbers
 from pathlib import Path
 import logging
 from scipy.stats import linregress
-from ase.io import read
+from ase.io import read, write
 
 
 def mkdir_warner(dir_path, interactive=False):
@@ -611,3 +611,40 @@ def lc(l):
     else:
         ll = l.lower().capitalize()
     return ll
+
+def at_extract(*argv):
+
+    def check_number(x):
+        if x[0] == "-":
+            x = x[1:]
+        if x.isdigit():
+            return True
+        else:
+            return False
+
+    trajname = sys.argv[1]
+    indices = sys.argv[2]
+    if len(sys.argv) == 4:      
+        savename = sys.argv[3]
+    else:
+        savename = 'extr_' + trajname
+    ats = read(trajname, index=':')
+    if ":" in indices:
+        indices = indices.split(":")
+    else:
+        indices = [indices]
+    if not all([check_number(x) for x in indices]):
+        raise ValueError('Please use a valid index or slice of indices')
+    else:
+        indices = [int(x) for x in indices]
+    
+    if len(indices) == 1:
+        extr = [ats[indices[0]]]
+    elif len(indices) == 2:
+        extr = ats[indices[0]:indices[1]]
+    elif len(indices) == 3:
+        extr = ats[indices[0]:indices[1]:indices[2]]
+    else:
+        raise ValueError('Please use a valid index or slice of indices')
+    
+    write(savename, extr)

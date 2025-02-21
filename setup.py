@@ -14,6 +14,7 @@ setup(
             "make_md = my_utils.utils_md:make_md",
             "atlen = my_utils.utils:atlen",
             "wrap = my_utils.utils_md:wrap",
+            "at_extract = my_utils.utils:at_extract",
         ],
     },
     classifiers=[

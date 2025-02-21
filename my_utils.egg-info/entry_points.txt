@@ -1,4 +1,5 @@
 [console_scripts]
+at_extract = my_utils.utils:at_extract
 atlen = my_utils.utils:atlen
 make_md = my_utils.utils_md:make_md
 wrap = my_utils.utils_md:wrap

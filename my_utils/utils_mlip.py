@@ -503,7 +503,7 @@ def make_comparison(is_ase1=True,
     if is_ase2 == True:
         ext2 = [x.flatten() for x in extract_prop_from_ase(structures2)]
     else:
-        ext2 = [x.flatten() for x in extract_prop_form_cfg(file2)]
+        ext2 = [x.flatten() for x in extract_prop_from_cfg(file2)]
     ext2[0] = ext2[0] #* natoms
 
     assert len(ext1) == len(ext2), f"You gave a different number of "\
@@ -555,7 +555,7 @@ def train_pot_tmp(mlip_bin,
                   dir,
                   params,
                   mpirun='',
-                  final_evaluation=True):
+                  final_evaluation=False):
     '''Function to train the MTP model, analogous to train_pot, but the init.mtp file is created by asking the level
     
         Parameters
@@ -673,7 +673,8 @@ def train_pot_tmp(mlip_bin,
     err_path =dir.joinpath('err_train')
     with open(log_path.absolute(), 'w') as log, open(err_path.absolute(), 'w') as err:
         run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)
-    set_level_to_pot_file(trained_pot_file_path=dir.joinpath(params['trained_pot_name']).absolute(), mtp_level=mtp_level)
+    trained_pot_file_path = dir.joinpath(params['trained_pot_name']).absolute()
+    set_level_to_pot_file(trained_pot_file_path=trained_pot_file_path, mtp_level=mtp_level)
     
     if final_evaluation == True:
         eval_dir = dir.joinpath('evaluation')
@@ -682,7 +683,7 @@ def train_pot_tmp(mlip_bin,
         calc_efs(mlip_bin.absolute(),
                  mpirun=mpirun, 
                  confs_path=train_set_path.absolute(),
-                 pot_path=trained_pot_path,
+                 pot_path=trained_pot_file_path,
                  out_path='ML_dataset.cfg',
                  dir=eval_dir.absolute())
         
@@ -698,7 +699,7 @@ def train_pot_tmp(mlip_bin,
                         outfile_pref='MLIP', 
                         units=None)
         
-def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun='', final_evaluation=True):
+def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun='', final_evaluation=False):
     '''
     Function to train the MTP model
     Arguments:
@@ -774,8 +775,8 @@ def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun='', final
     err_path = dir.joinpath('err_train')
     with open(log_path.absolute(), 'w') as log, open(err_path.absolute(), 'w') as err:
         run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)
-    trained_pot_path = dir.joinpath(params['trained_pot_name']).absolute()
-    set_level_to_pot_file(trained_pot_file_path=trained_pot_path, mtp_level=mtp_level)
+    trained_pot_file_path = dir.joinpath(params['trained_pot_name']).absolute()
+    set_level_to_pot_file(trained_pot_file_path=trained_pot_file_path, mtp_level=mtp_level)
 
     if final_evaluation == True:
         eval_dir = dir.joinpath('evaluation')
@@ -784,7 +785,7 @@ def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun='', final
         calc_efs(mlip_bin.absolute(),
                  mpirun=mpirun, 
                  confs_path=train_set_path.absolute(),
-                 pot_path=trained_pot_path,
+                 pot_path=trained_pot_file_path,
                  out_path='ML_dataset.cfg',
                  dir=eval_dir.absolute())
         
