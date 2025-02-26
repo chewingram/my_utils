@@ -1,0 +1,10 @@
+cd folds/1_fold
+python run_single_k.py
+cd ../1_fold
+python run_single_k.py
+cd ../2_fold
+python run_single_k.py
+cd ../3_fold
+python run_single_k.py
+cd ../4_fold
+python run_single_k.py
