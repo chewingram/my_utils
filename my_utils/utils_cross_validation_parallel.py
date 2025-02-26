@@ -17,6 +17,24 @@ from . import utils_mlip as mlp
 
 
 def single_k(wdir):
+    '''Function to launch a single fold of a k-fold crossvalidation
+    It needs a file called parameters.pkl (saved in 'wb' mode, with pickle) containing a dictionary with the following key-value items:
+    mpirun: string to use before the calls of binaries (e.g. 'srun')
+    mlip_bin: path to the mtp binary
+    train_flag_params: look for the description of this in the 'launch_parallel_k_fold' function
+    train_params: same as above
+    dataset_path: path to the dataset 
+    conf_index: index of the last structure (included) to consider in the dataset in general (dataset[:conf_index] will be used as total dataset
+        -to be splitted into training and test set-) 
+    i1: index of the first structure to consider as test set in the dataset
+    i2: index of the last structure (excluded) to consider as test set in the dataset (dataset[i1:i2] will be used as test set)
+    seed: seed to use with random.shuffle() to shuffle the dataset before splitting
+    Parameters
+    ----------
+    wdir: str|Path
+        directory where to run everything
+
+    '''
     wdir = Path(wdir)
     
     l1 = setup_logging(logger_name='single_k_log', log_file=wdir.joinpath('single_k_log'), debug=False)
@@ -157,17 +175,104 @@ def launch_parallel_k_fold(wdir,
                            mpirun,
                            mlip_bin,
                            dataset_path, 
-                           conf_index,
                            tot_dtsize,
                            train_flag_params,
                            train_params,
+                           conf_index=None,
                            job_file_path='./job.sh',
                            logging=True, 
                            logger_name='paral_k_logger', 
                            logger_filepath='paral_k.log', 
                            debug_log=False):
+    '''Function to launch a k-fold crossvalidation in parallel.
+    A tree of directories and file will be created with the a directory for each k-fold training+test (e.g. wdir/folds/N_fold/ - N goes in [1, nfolds])
+    with run_single_k.py, the jobfile and parameters.pkl.
+
+    Parameters
+    ----------
+    wdir: str|Path
+        directory where to launch the thing
+    increase_step: int
+        number of structures to increase the dataset by at each iteration of the training; it must be a multiple of nfolds
+    nfolds: int
+        number of folds used in the k-fold crossvalidation protocol  
+    min_dtsize: int
+        minimum size of the initial (smallest) dataset used
+    mpirun: str
+        command for mpi or similar (e.g. 'mpirun')
+    mlip_bin: str, path
+        path to the mlip binary
+    dataset: ase.Atoms
+        dataset as an ASE trajectory
+    train_flag_params: dict
+        dictionary containing the flags to use; these are the possibilities:
+        ene_weight: float, default=1
+            weight of energies in the fitting
+        for_weight: float, default=0.01
+            weight of forces in the fitting
+        str_weight: float, default=0.001 
+            weight of stresses in the fitting
+        sc_b_for: float, default=0
+            if >0 then configurations near equilibrium (with roughtly force < 
+            <double>) get more weight
+        val_cfg: str 
+            filename with configuration to validate
+        max_iter: int, default=1000
+            maximal number of iterations
+        bfgs_tol: float, default=1e-3
+            stop if error dropped by a factor smaller than this over 50 BFGS 
+            iterations
+        weighting: {'vibrations', 'molecules', 'structures'}, default=vibrations 
+            how to weight configuration wtih different sizes relative to each 
+            other
+        init_par: {'random', 'same'}, default='random'
+            how to initialize parameters if a potential was not pre-fitted;
+            - random: random initialization
+            - same: this is when interaction of all species is the same (more 
+                    accurate fit, but longer optimization)
+        skip_preinit: bool 
+            skip the 75 iterations done when parameters are not given
+        up_mindist: bool
+            updating the mindist parameter with actual minimal interatomic 
+            distance in the training set
+    train_params: dict
+        dictionary with the parameters for the training; these are the parameters to set:
+        untrained_pot_file_dir: str 
+            path to the directory containing the untrained mtp init files (.mtp)
+        mtp_level: {2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 21, 22, 24, 26, 28}
+            level of the mtp model to train
+        max_dist: float
+                cutoff radius for the radial part (unit: Angstrom)
+        radial_basis_size: int, default=8
+            number of basis functions to use for the radial part
+        radial_basis_type: {'RBChebyshev', ???}, default='RBChebyshev'
+            type of basis functions to use for the radial part
+     conf_index: int; default=None
+        index of the last structure of the dataset to include (e.g. if conf_index=100, the structures from 0-th to 100-th -included- will be used); it
+        also corresponds to the size of the actual dataset used in the k-fold crossvalidation. If =None, the whole dataset is used and conf_index will
+        be set = len(dataset) - 1
+     job_file_path: str|Path
+        path to the job file for slurm, please provide an empty file if you don't need the sbatch file; it must launch the command "python run_single_k.py"
+    logging: bool; default = True
+        activate the logging
+    logger_name: str; default = None
+        name of the logger to use; if a logger with that name already exists (e.g. it was 
+        created by a calling function) it will be used, otherwise a new one will be created.
+        If the logger_name is None, the root logger will be used.
+    logger_filepath: str; default = 'convergence.log'
+        path to the file that will contain the log. If None and no preexisting file handler is there, 
+        no log file will be created. If an existing logger name is provided and it already has
+        a file handler, this argument will be ignored and the preexisting file handler will be used; if no
+        handler already exists, or a new logger is created, this argument is the filepath of the log file.
+     debug_log: bool;  default = False
+         if a new logger is created (preexisting_logger_name = None), then activate debug logging
+
+
+    '''
     
     dataset_path = Path(dataset_path)
+    if conf_index == None:
+        conf_index = len(read(dataset_path), index=':') - 1
     dtsize = conf_index + 1
 
     folds_dir = wdir.joinpath('folds')
@@ -175,7 +280,7 @@ def launch_parallel_k_fold(wdir,
         shutil.rmtree(folds_dir.absolute())
     folds_dir.mkdir(parents=True, exist_ok=True)
     job_file_path = Path(job_file_path)
-    
+            
     run_single_k_filepath = Path(__file__).parent.joinpath('data/parallel_k_fold/run_single_k.py').resolve().absolute()
     
     # seed
@@ -235,6 +340,107 @@ def parallel_conv_crossvalidation(root_dir='./',
                                   train_flag_params=None,
                                   train_params=None,
                                   sbatch=False):
+    
+    '''Function to run a convergence check of a dataset + model according to a k-fold crossvalidation protocol in parallel
+    Progressively wider subset of the total dataset are crossvalidated. Each crossvalidation is done in parallel, as they are independend. For each crossvalidation, 
+    the k folds are done in parallel, as they are independent. Hence, a tree will be generate of this kind:
+    root_dir/
+    └── iterations
+        ├── 1_iter
+        │   └── folds
+        │       ├── 1_fold
+        │       ├── 2_fold
+        │       ├── 3_fold
+        │       ├── ...
+        │       └── k-fold
+        ├── 2_iter
+        │   └── folds
+        │       ├── 1_fold
+        │       ├── 2_fold
+        │       ├── 3_fold
+        │       ├── ...
+        │       └── k-fold
+        ├── 3_iter
+        │   └── folds
+        │       ├── 1_fold
+        │       ├── 2_fold
+        │       ├── 3_fold
+        │       ├── ...
+        │       └── k-fold
+        ├── ...
+        └── N_iter
+            └── folds
+                ├── 1_fold
+                ├── 2_fold
+                ├── 3_fold
+                ├── ...
+                └── k-fold
+    This function also produces a script called "fetch_results.py" to be used when every fold has been done and the results must be collected together.
+
+    Parameters
+    ----------
+    root_dir: str|Path
+        root directory where to run everything
+    job_file_path: str|Path
+        path to the job file for slurm, please provide an empty file if you don't need the sbatch file; it must launch the command "python run_single_k.py"
+    increase_step: int
+        number of structures to increase the dataset by at each iteration of the training; it must be a multiple of nfolds
+    nfolds: int
+        number of folds used in the k-fold crossvalidation protocol  
+    min_dtsize: int
+        minimum size of the initial (smallest) dataset used
+    mpirun: str
+        command for mpi or similar (e.g. 'mpirun')
+    mlip_bin: str, path
+        path to the mlip binary
+    dataset: ase.Atoms
+        dataset as an ASE trajectory
+    train_flag_params: dict
+        dictionary containing the flags to use; these are the possibilities:
+        ene_weight: float, default=1
+            weight of energies in the fitting
+        for_weight: float, default=0.01
+            weight of forces in the fitting
+        str_weight: float, default=0.001 
+            weight of stresses in the fitting
+        sc_b_for: float, default=0
+            if >0 then configurations near equilibrium (with roughtly force < 
+            <double>) get more weight
+        val_cfg: str 
+            filename with configuration to validate
+        max_iter: int, default=1000
+            maximal number of iterations
+        bfgs_tol: float, default=1e-3
+            stop if error dropped by a factor smaller than this over 50 BFGS 
+            iterations
+        weighting: {'vibrations', 'molecules', 'structures'}, default=vibrations 
+            how to weight configuration wtih different sizes relative to each 
+            other
+        init_par: {'random', 'same'}, default='random'
+            how to initialize parameters if a potential was not pre-fitted;
+            - random: random initialization
+            - same: this is when interaction of all species is the same (more 
+                    accurate fit, but longer optimization)
+        skip_preinit: bool 
+            skip the 75 iterations done when parameters are not given
+        up_mindist: bool
+            updating the mindist parameter with actual minimal interatomic 
+            distance in the training set
+    train_params: dict
+        dictionary with the parameters for the training; these are the parameters to set:
+        untrained_pot_file_dir: str 
+            path to the directory containing the untrained mtp init files (.mtp)
+        mtp_level: {2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 21, 22, 24, 26, 28}
+            level of the mtp model to train
+        max_dist: float
+                cutoff radius for the radial part (unit: Angstrom)
+        radial_basis_size: int, default=8
+            number of basis functions to use for the radial part
+        radial_basis_type: {'RBChebyshev', ???}, default='RBChebyshev'
+            type of basis functions to use for the radial part
+    sbatch: bool; default=False
+        If True, the job files of each fold calculation will be sbatched with "sbatch name_of_the_jobfile"
+    '''
 
     
     root_dir = Path('./')
@@ -314,8 +520,17 @@ def parallel_conv_crossvalidation(root_dir='./',
                 
 
 
-
 def fetch_results_single_crossv(root_dir):
+    '''
+    Function to gather the results obtained by running the parallel_conv_crossvalidation
+
+    Parameters
+    ----------
+    wdir: str|Path
+        path to the root_dir passed to parallel_conv_crossvalidation (the one containing the folder iterations/)
+    
+    '''
+
     root_dir = Path(root_dir)
     list_of_folders = sorted(root_dir.joinpath('folds').glob('*_fold'))
 
