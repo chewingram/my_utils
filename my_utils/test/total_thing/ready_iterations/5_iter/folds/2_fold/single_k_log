@@ -1,8 +1,0 @@
-  -About to begin the training phase
-  -Training done
-  -About to begin the testing phase
-  -Testing done.
-  Results for the fold:
-  #n. fold  fold size     rmse eV/at (E)      mae eV/at (E)             R2 (E)  rmse eV/Angst (F)   mae eV/Angst (F)             R2 (F)       rmse eV/Angst^2 (S)        mae eV/Angst^2 (S)             R2 (S)
-
-         1         24       0.0017921781       0.0016070013       0.9984055953       0.1042713507       0.0767501080       0.9789467369       0.0012347714       0.0008749370       0.9405953762
