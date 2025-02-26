@@ -137,7 +137,7 @@ def plot_convergence_stuff(res, dt_sizes, dir):
 
 
     ax1[2].set_xlabel('Size of the dataset')
-    ax1[2].set_ylabel('Stress RMSE (GPa)')
+    ax1[2].set_ylabel('Stress RMSE (eV/$\mathrm{\AA}^2$)')
     ax1[2].plot(dt_sizes, y_s, label='Stress RMSE', ls='-', marker='o', color='green')
 
     fig_avg_rmse.patch.set_linewidth(1)
@@ -163,7 +163,7 @@ def plot_convergence_stuff(res, dt_sizes, dir):
 
 
     ax2[2].set_xlabel('Size of the dataset')
-    ax2[2].set_ylabel('Stress RMSE (GPa)')
+    ax2[2].set_ylabel('Stress RMSE (eV/$\mathrm{\AA}^2$)')
     ax2[2].plot(dt_sizes, y_s, label='Stress RMSE', ls='-', marker='o', color='green')
 
     fig_max_rmse.patch.set_linewidth(1)
@@ -189,7 +189,7 @@ def plot_convergence_stuff(res, dt_sizes, dir):
 
 
     ax1[2].set_xlabel('Size of the dataset')
-    ax1[2].set_ylabel('Stress MAE (GPa)')
+    ax1[2].set_ylabel('Stress MAE (eV/$\mathrm{\AA}^2$)')
     ax1[2].plot(dt_sizes, y_s, label='Stress MAE', ls='-', marker='o', color='green')
 
     fig_avg_mae.patch.set_linewidth(1)
@@ -215,7 +215,7 @@ def plot_convergence_stuff(res, dt_sizes, dir):
 
 
     ax2[2].set_xlabel('Size of the dataset')
-    ax2[2].set_ylabel('Stress MAE (GPa)')
+    ax2[2].set_ylabel('Stress MAE (eV/$\mathrm{\AA}^2$)')
     ax2[2].plot(dt_sizes, y_s, label='Stress MAE', ls='-', marker='o', color='green')
 
     fig_max_mae.patch.set_linewidth(1)
@@ -378,7 +378,7 @@ def cross_validate_kfold(nfolds,
     else:
         l1 = mute_logger()
     
-    start_message = 'K-fold crossvalidation begun at ' + datetime.datetime.now().strftime("%d %b %Y - %H:%M:%S")
+    start_message = 'K-fold crossvalidation begun on ' + datetime.datetime.now().strftime("%d %b %Y - %H:%M:%S")
     l1.info(start_message)
     
     # seed
@@ -392,7 +392,7 @@ def cross_validate_kfold(nfolds,
     res_sum = f'Results of k-fold cross-validation. Seed used to shuffle the dataset: {seed}\n' 
     res_header = f'#n. fold  fold size  {space(3)}rmse eV/at (E)  {space(4)}mae eV/at (E)  {space(11)}R2 (E)  '
     res_header += f'{space(0)}rmse eV/Angst (F)  {space(1)}mae eV/Angst (F)  {space(11)}R2 (F)  '
-    res_header += f'{space(5)}rmse GPa (S)  {space(6)}mae GPa (S)  {space(11)}R2 (S)\n'
+    res_header += f'{space(5)}rmse eV/Angs^2 (S)  {space(6)}mae eV/Angs^2 (S)  {space(11)}R2 (S)\n'
     res_sum += res_header
     
     tr_e_rmse = []
@@ -463,6 +463,7 @@ def cross_validate_kfold(nfolds,
         train_params['train_set'] = train_set
         train_params['mlip_bin'] = mlip_bin
         train_params['mpirun'] = mpirun
+        train_params['final_evaluation'] = False
 
         if 'val_cfg' in train_params.keys(): del train_params['val_cfg']
         
@@ -835,7 +836,7 @@ def check_convergence_kfold(increase_step,
     expl += "\n- dt_sizes: a list with the size of the total datasets used in each crossvalidation;"
     expl += "\n- res: contains for each iteration two elements: errs_train and errs_test as they are output by mlp.make_comparison"
     expl += "\n\t its shape is: "
-    expl += "\n\t\t(n_iteration, n_set_types, n_properties, n_metrics, n_folds):
+    expl += "\n\t\t(n_iteration, n_set_types, n_properties, n_metrics, n_folds):"
     expl += "\n\t and these are the dimensions:"
     expl += "\n\t\t1-iteration; 2-[training set, test set]; 3-dict['energy', 'forces', 'stress']; 4-[rmse, mae, r2]; 5-fold;"
     expl += "\n- meta: a list of two elements: (i) the parameters that were passed to the function when it was launched last time, "
@@ -869,3 +870,5 @@ def check_convergence_kfold(increase_step,
     # 1-iteration; 2-[training set, test set]; 3-dict['energy', 'forces', 'stress']; 4-[rmse, mae, r2]; 5-fold
         
     plot_convergence_stuff(res, dt_sizes, dir='Convergence_figures/')
+
+        

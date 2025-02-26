@@ -41,7 +41,7 @@ def plot_correlations(dtset_ind, ind, dir='', offsets=None, save=False, units=No
     # order: 0=energy, 1=forces, 2=stress
     names = ['energy', 'forces', 'stress']
     if units == None:
-        units = ['eV/at', 'ev/$\mathrm{\AA}$', 'eV/Angst^2']
+        units = ['eV/at', 'ev/$\mathrm{\AA}$', 'eV/$\mathrm{\AA}^2$']
     file_names = [dir.joinpath(f'{dtset_used[dtset_ind]}-{cap_first(x)}_comparison.dat') for x in names]
     if offsets is None:
         #offsets = [35, 1.8, 1] # negative offset of the y position of the text box 
@@ -466,7 +466,7 @@ def make_comparison(is_ase1=True,
             structures2 = [structures2]
     else:
         assert file2 is not None, f"When is_ase2 = False, file2 must be given!"
-        file2 = Path(file1)
+        file2 = Path(file2)
         assert file2.is_file() == True, f"{file2.absolute()} is not a file!"
     
     if make_file == True:
@@ -486,7 +486,7 @@ def make_comparison(is_ase1=True,
         props =  ['energy', 'forces', 'stress']
     
     if units == None:
-        units = dict(energy='eV/at', forces='eV/Angst', stress='eV/Angst^2')
+        units = dict(energy='eV/at', forces='eV/$\mathrm{\AA}$', stress='eV/$\mathrm{\AA}^2$')
         
     prop_numbs = dict(energy = 0, forces = 1, stress = 2)
     
@@ -521,6 +521,7 @@ def make_comparison(is_ase1=True,
         errs[prop] = [rmse2, mae2, R22]
         
         if make_file == True:
+            print(f'printing in {filename.absolute()}')
             text = f'# rmse: {rmse2:.5f} {units[prop]},    mae: {mae2:.5f} {units[prop]}    R2: {R22:.5f}\n'
             text += f'#  True {low_first(prop)}           Predicted {low_first(prop)}\n'
             for x, y in zip(ext1[i], ext2[i]):
@@ -684,7 +685,7 @@ def train_pot_tmp(mlip_bin,
                  mpirun=mpirun, 
                  confs_path=train_set_path.absolute(),
                  pot_path=trained_pot_file_path,
-                 out_path='ML_dataset.cfg',
+                 out_path=eval_dir.joinpath('ML_dataset.cfg'),
                  dir=eval_dir.absolute())
         
         make_comparison(is_ase1=False,
@@ -696,7 +697,7 @@ def train_pot_tmp(mlip_bin,
                         props='all', 
                         make_file=True, 
                         dir=eval_dir,
-                        outfile_pref='MLIP', 
+                        outfile_pref='MLIP-', 
                         units=None)
         
 def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun='', final_evaluation=False):
@@ -786,7 +787,7 @@ def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun='', final
                  mpirun=mpirun, 
                  confs_path=train_set_path.absolute(),
                  pot_path=trained_pot_file_path,
-                 out_path='ML_dataset.cfg',
+                 out_path=eval_dir.joinpath('ML_dataset.cfg'),
                  dir=eval_dir.absolute())
         
         make_comparison(is_ase1=False,
@@ -798,7 +799,7 @@ def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun='', final
                         props='all', 
                         make_file=True, 
                         dir=eval_dir,
-                        outfile_pref='MLIP', 
+                        outfile_pref='MLIP-', 
                         units=None)
             
 
@@ -1111,6 +1112,12 @@ def make_ini_for_lammps(pot_file_path, out_file_path):
         fl.writelines(txt)
 
         
+
+
+
+
+
+
 
 
 

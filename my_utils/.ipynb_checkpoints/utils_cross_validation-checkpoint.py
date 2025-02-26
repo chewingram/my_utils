@@ -137,7 +137,7 @@ def plot_convergence_stuff(res, dt_sizes, dir):
 
 
     ax1[2].set_xlabel('Size of the dataset')
-    ax1[2].set_ylabel('Stress RMSE (GPa)')
+    ax1[2].set_ylabel('Stress RMSE (eV/$\mathrm{\AA}^2$)')
     ax1[2].plot(dt_sizes, y_s, label='Stress RMSE', ls='-', marker='o', color='green')
 
     fig_avg_rmse.patch.set_linewidth(1)
@@ -163,7 +163,7 @@ def plot_convergence_stuff(res, dt_sizes, dir):
 
 
     ax2[2].set_xlabel('Size of the dataset')
-    ax2[2].set_ylabel('Stress RMSE (GPa)')
+    ax2[2].set_ylabel('Stress RMSE (eV/$\mathrm{\AA}^2$)')
     ax2[2].plot(dt_sizes, y_s, label='Stress RMSE', ls='-', marker='o', color='green')
 
     fig_max_rmse.patch.set_linewidth(1)
@@ -189,7 +189,7 @@ def plot_convergence_stuff(res, dt_sizes, dir):
 
 
     ax1[2].set_xlabel('Size of the dataset')
-    ax1[2].set_ylabel('Stress MAE (GPa)')
+    ax1[2].set_ylabel('Stress MAE (eV/$\mathrm{\AA}^2$)')
     ax1[2].plot(dt_sizes, y_s, label='Stress MAE', ls='-', marker='o', color='green')
 
     fig_avg_mae.patch.set_linewidth(1)
@@ -215,7 +215,7 @@ def plot_convergence_stuff(res, dt_sizes, dir):
 
 
     ax2[2].set_xlabel('Size of the dataset')
-    ax2[2].set_ylabel('Stress MAE (GPa)')
+    ax2[2].set_ylabel('Stress MAE (eV/$\mathrm{\AA}^2$)')
     ax2[2].plot(dt_sizes, y_s, label='Stress MAE', ls='-', marker='o', color='green')
 
     fig_max_mae.patch.set_linewidth(1)
@@ -378,7 +378,7 @@ def cross_validate_kfold(nfolds,
     else:
         l1 = mute_logger()
     
-    start_message = 'K-fold crossvalidation begun at ' + datetime.datetime.now().strftime("%d %b %Y - %H:%M:%S")
+    start_message = 'K-fold crossvalidation begun on ' + datetime.datetime.now().strftime("%d %b %Y - %H:%M:%S")
     l1.info(start_message)
     
     # seed
@@ -392,7 +392,7 @@ def cross_validate_kfold(nfolds,
     res_sum = f'Results of k-fold cross-validation. Seed used to shuffle the dataset: {seed}\n' 
     res_header = f'#n. fold  fold size  {space(3)}rmse eV/at (E)  {space(4)}mae eV/at (E)  {space(11)}R2 (E)  '
     res_header += f'{space(0)}rmse eV/Angst (F)  {space(1)}mae eV/Angst (F)  {space(11)}R2 (F)  '
-    res_header += f'{space(5)}rmse GPa (S)  {space(6)}mae GPa (S)  {space(11)}R2 (S)\n'
+    res_header += f'{space(5)}rmse eV/Angs^2 (S)  {space(6)}mae eV/Angs^2 (S)  {space(11)}R2 (S)\n'
     res_sum += res_header
     
     tr_e_rmse = []
@@ -463,6 +463,7 @@ def cross_validate_kfold(nfolds,
         train_params['train_set'] = train_set
         train_params['mlip_bin'] = mlip_bin
         train_params['mpirun'] = mpirun
+        train_params['final_evaluation'] = False
 
         if 'val_cfg' in train_params.keys(): del train_params['val_cfg']
         
@@ -793,7 +794,7 @@ def check_convergence_kfold(increase_step,
         #debug_log = parameters['debug_log']
 
 
-    l1.info('Evaluation of the convergence of dataset started on ' + datetime.datetime.now().strftime("%d %b %Y - %H:%M:%S"))
+    l1.info('Evaluation of the convergence of dataset started xon ' + datetime.datetime.now().strftime("%d %b %Y - %H:%M:%S"))
     dtsize = len(dataset)
     
     
@@ -835,7 +836,7 @@ def check_convergence_kfold(increase_step,
     expl += "\n- dt_sizes: a list with the size of the total datasets used in each crossvalidation;"
     expl += "\n- res: contains for each iteration two elements: errs_train and errs_test as they are output by mlp.make_comparison"
     expl += "\n\t its shape is: "
-    expl += "\n\t\t(n_iteration, n_set_types, n_properties, n_metrics, n_folds):
+    expl += "\n\t\t(n_iteration, n_set_types, n_properties, n_metrics, n_folds):"
     expl += "\n\t and these are the dimensions:"
     expl += "\n\t\t1-iteration; 2-[training set, test set]; 3-dict['energy', 'forces', 'stress']; 4-[rmse, mae, r2]; 5-fold;"
     expl += "\n- meta: a list of two elements: (i) the parameters that were passed to the function when it was launched last time, "
@@ -869,3 +870,134 @@ def check_convergence_kfold(increase_step,
     # 1-iteration; 2-[training set, test set]; 3-dict['energy', 'forces', 'stress']; 4-[rmse, mae, r2]; 5-fold
         
     plot_convergence_stuff(res, dt_sizes, dir='Convergence_figures/')
+
+
+
+def single_k(wdir):
+    
+    wdir = Path(wdir)
+    
+    l1 = setup_logging(logger_name='single_k_log', log_file=wdir.joinpath('single_k_log'), debug=False)
+    
+    # first we need to import everything
+    with open('parameters.pkl', 'rb') as fl:
+        import_parameters = pkl.load(fl)
+
+    # order:
+    # 0 - explanatory variable
+    # 1 - mpirun
+    # 2 - mlip_bin
+    # 3 - train_flag_params
+    # 4 - train_params
+    # 5 - dataset_path
+    # 6 - i1
+    # 7 - i2
+    
+    mpirun = import_parameters['mpirun']
+    mlip_bin = import_parameters['mlip_bin']
+    train_flag_params = import_parameters['train_flag_params']
+    train_params = import_parameters['train_params']
+    traj_path = Path(import_parameters['dataset_path'])
+    i1 = import_parameters['i1']
+    i2 = import_parameters['i2']
+    
+    # starting message
+    msg = f'Single k-fold run started on ' + datetime.datetime.now().strftime("%d %b %Y - %H:%M:%S") + '.'
+    msg += f'\nThe slice of dataset {i1}:{i2} will be used as test set, the rest as training set.'
+    
+    dataset = read(traj_path, index=':')
+    mask = np.repeat(False, len(dataset)) # make a mask
+    mask[i1:i2] = True # true only for the fold (test set)
+    train_set = [cp(x) for x, bool in zip(dataset, mask) if not bool]
+    test_set = [cp(x) for x, bool in zip(dataset, mask) if bool]
+    set_length = len(test_set)
+
+    # Now we have train- and test set. We need to train and then test.
+     # compute the minimum distance
+    min_dist = mlp.find_min_dist(train_set)
+    
+    trained_pot_name = 'pot.mtp'
+
+    train_flag_params['trained_pot_name'] = trained_pot_name
+    if 'cur_pot_n' in train_flag_params.keys(): del train_flag_params['cur_pot_n']
+    train_params['min_dist'] = min_dist
+    train_params['dir'] = wdir.absolute()
+    train_params['params'] = train_flag_params
+    train_params['train_set'] = train_set
+    train_params['mlip_bin'] = mlip_bin
+    train_params['mpirun'] = mpirun
+    train_params['final_evaluation'] = False
+
+    if 'val_cfg' in train_params.keys(): del train_params['val_cfg']
+    
+    l1.info(f'  -About to begin the training phase')
+    mlp.train_pot_from_ase_tmp(**train_params)
+    l1.info(f'  -Training done')
+                                          
+    ml_train_set = mlp.calc_efs_from_ase(mlip_bin = mlip_bin, 
+                                         atoms=train_set, 
+                                         mpirun=train_params['mpirun'], 
+                                         pot_path=wdir.joinpath('pot.mtp').absolute(), 
+                                         cfg_files=False, 
+                                         dir=wdir.absolute(),
+                                         write_conf=False, 
+                                         outconf_name=None)
+    
+    errs_train = mlp.make_comparison(is_ase1=True,
+                                     is_ase2=True,
+                                     structures1=train_set, 
+                                     structures2=ml_train_set, 
+                                     props='all', 
+                                     make_file=False, 
+                                     dir=wdir.absolute(),
+                                     outfile_pref='', 
+                                     units=None)
+    
+    
+    l1.info(f'  -About to begin the testing phase')
+    ml_test_set = mlp.calc_efs_from_ase(mlip_bin = train_params['mlip_bin'], 
+                                        atoms=test_set, 
+                                        mpirun=train_params['mpirun'], 
+                                        pot_path=wdir.joinpath('pot.mtp').absolute(), 
+                                        cfg_files=False, 
+                                        out_path='./out.cfg',
+                                        dir=wdir.absolute(),
+                                        write_conf=False, 
+                                        outconf_name=None)
+                                    
+    errs_test = mlp.make_comparison(is_ase1=True,
+                                     is_ase2=True,
+                                     structures1=test_set, 
+                                     structures2=ml_test_set, 
+                                     props='all', 
+                                     make_file=False, 
+                                     dir=wdir.absolute(),
+                                     outfile_pref='', 
+                                     units=None)
+    
+    res_header = f'#n. fold  fold size  {space(3)}rmse eV/at (E)  {space(4)}mae eV/at (E)  {space(11)}R2 (E)  '
+    res_header += f'{space(0)}rmse eV/Angst (F)  {space(1)}mae eV/Angst (F)  {space(11)}R2 (F)  '
+    res_header += f'{space(5)}rmse eV/Angst^2 (S)  {space(6)}mae eV/Angst^2 (S)  {space(11)}R2 (S)\n'
+    
+    l1.info(f'  -Testing done.\n  Results for the fold:')
+    l1.info('  ' + res_header)
+
+    e_rmse = errs_test['energy'][0]               
+    e_mae = errs_test['energy'][1]
+    e_R2 = errs_test['energy'][2]                 
+    f_rmse = errs_test['forces'][0]
+    f_mae = errs_test['forces'][1]                   
+    f_R2 = errs_test['forces'][2]                   
+    s_rmse = errs_test['stress'][0]                    
+    s_mae = errs_test['stress'][1]            
+    s_R2 = errs_test['stress'][2]
+    
+    res_text = f"{1:>8}  {set_length:>9}  {e_rmse:>17.10f}  {e_mae:>17.10f}  {e_R2:>17.10f}  " + \
+                  f"{f_rmse:>17.10f}  {f_mae:>17.10f}  {f_R2:>17.10f}  {s_rmse:>17.10f}  {s_mae:>17.10f}  " + \
+                  f"{s_R2:>17.10f}"
+     
+    l1.info('  ' + res_text)
+
+    with open(wdir.joinpath('resfile.pkl'), 'wb') as fl:
+        pkl.dump([errs_train, errs_test], fl)
+        
