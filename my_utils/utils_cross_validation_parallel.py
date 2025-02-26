@@ -6,6 +6,7 @@ import datetime
 import shutil
 import random as rnd
 import numpy as np
+import subprocess
 
 from ase.io import read, write
 
@@ -205,7 +206,6 @@ def launch_parallel_k_fold(wdir,
 
         #dataset_path = wdir.joinpath('Trajectory.traj')
         #write(dataset_path.absolute(),dataset)
-        print(f'i1 and i2 for {i}-th fold are: {i1} {i2}\nThe dataset has {dtsize} confs')
         explanatory_var = ''
         import_parameters = dict(mpirun=mpirun,
                                  mlip_bin=mlip_bin,
@@ -233,11 +233,12 @@ def parallel_conv_crossvalidation(root_dir='./',
                                   mlip_bin='mlp', 
                                   dataset=None, 
                                   train_flag_params=None,
-                                  train_params=None):
+                                  train_params=None,
+                                  sbatch=False):
 
     
     root_dir = Path('./')
-    
+    job_file_path = Path(job_file_path) 
     # make directory for the iterations
     iters_dir = root_dir.joinpath('iterations')
     if iters_dir.is_dir():
@@ -294,14 +295,23 @@ def parallel_conv_crossvalidation(root_dir='./',
                                tot_dtsize=dtsize,
                                train_flag_params=train_flag_params,
                                train_params=train_params,
-                               job_file_path=job_file_path,
+                               job_file_path=job_file_path.absolute(),
                                logging=True, 
                                logger_name='paral_k_logger', 
                                logger_filepath='paral_k.log', 
                                debug_log=False)
     fetcher_path = Path(__file__).parent.joinpath('data/parallel_k_fold/fetch_results.py').resolve().absolute()
-    shutil.copy(root_dir, wdir)
-
+    shutil.copy(fetcher_path, root_dir)
+    
+    if sbatch == True:
+        for i in range(n_iters):            
+            # make dir for the current iteration
+            iter_dir = iters_dir.joinpath(f'{i+1}_iter')
+            list_of_dirs = sorted(iter_dir.glob('folds/*_fold'))
+            for dir in list_of_dirs:
+                job_file_path = dir.joinpath('job.sh')
+                subprocess.run(f'sbatch {job_file_path.absolute()}', shell=True, cwd=dir.absolute())
+                
 
 
 
