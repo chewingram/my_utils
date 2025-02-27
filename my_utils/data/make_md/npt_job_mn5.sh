@@ -27,10 +27,9 @@ echo "threads : $OMP_NUM_THREADS"
 ####################################################################################
 # Load modules and python environment
 module --force purge
-source /gpfs/home/ulie/ulie583683/environments/intel_2023.2.0
-
+source /gpfs/home/ulie/ulie583683/.bashrc
 export OMP_NUM_THREADS=1
-export MKL_NUM_THREADS=1
+#export MKL_NUM_THREADS=1
 
 echo -n "The job started on "
 date

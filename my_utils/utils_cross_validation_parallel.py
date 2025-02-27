@@ -513,7 +513,7 @@ def parallel_conv_crossvalidation(root_dir='./',
         for i in range(n_iters):            
             # make dir for the current iteration
             iter_dir = iters_dir.joinpath(f'{i+1}_iter')
-            list_of_dirs = sorted(iter_dir.glob('folds/*_fold'))
+            list_of_dirs = sorted([x for x in iter_dir.joinpath('folds').glob('*_fold')], key=lambda x: int(str(x.name).split('_')[0])) 
             for dir in list_of_dirs:
                 job_file_path = dir.joinpath('job.sh')
                 subprocess.run(f'sbatch {job_file_path.absolute()}', shell=True, cwd=dir.absolute())
@@ -527,12 +527,12 @@ def fetch_results_single_crossv(root_dir):
     Parameters
     ----------
     wdir: str|Path
-        path to the root_dir passed to parallel_conv_crossvalidation (the one containing the folder iterations/)
+        path to the directory created by parallel_conv_crossvalidation for the current k-fold crossvalidation, containing the folder folds/)
     
     '''
 
     root_dir = Path(root_dir)
-    list_of_folders = sorted(root_dir.joinpath('folds').glob('*_fold'))
+    list_of_folders = sorted((x for x in root_dir.joinpath('folds').glob('*_fold')), key=lambda x: int(str(x.name).split('_')[0]))
 
     res_header = f'#n. fold  fold size  {space(5)}rmse eV/at (E)  {space(6)}mae eV/at (E)  {space(13)}R2 (E)  '
     res_header += f'{space(2)}rmse eV/Angst (F)  {space(3)}mae eV/Angst (F)  {space(13)}R2 (F)  '
