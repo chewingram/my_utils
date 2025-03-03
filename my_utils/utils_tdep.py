@@ -805,7 +805,7 @@ def write_dielectric_tensors(natoms, wdir=Path('./'), atomic=False, outfilepath=
         for i in range(1, natoms+1):
             for j in range(3):
                 for k in [1,2]:
-                    num = natoms*i + 2*j + k
+                    num = natoms*(i-1) + 2*j + k
 
                     displ_dir = wdir.joinpath(f'displacement_{num:0{5}d}_{js[j]}')
                     if not displ_dir.exists():
@@ -822,8 +822,8 @@ def write_dielectric_tensors(natoms, wdir=Path('./'), atomic=False, outfilepath=
                                 print(f'The calculation of the {ks[k]}-th displacement of atom {i} along {js[j]} ({filepath.absolute()}) is not completed!')
                                 bad = True
         if bad == True:
-            #exit()
-            pass
+            exit()
+            #pass
         
         txt = ''
         for i in range(1, natoms+1):
@@ -831,7 +831,7 @@ def write_dielectric_tensors(natoms, wdir=Path('./'), atomic=False, outfilepath=
 
                 # positive atomic displ.
                 k = 1
-                num = natoms*i + 2*j + k
+                num = natoms*(i-1) + 2*j + k
                 filepath = wdir.joinpath(f'displacement_{num:0{5}d}_{js[j]}/run.abo')
                 tens_p = parse_dielectric_tensors(filepath.absolute())
 
