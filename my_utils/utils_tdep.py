@@ -754,24 +754,24 @@ def write_dielectric_tensors(natoms, wdir=Path('./'), atomic=False, outfilepath=
         
     if atomic == False: # MODE DISPLACEMENTS
         # check that all the modes are there
-        bad = 0
+        bad = False
         for i in range(3, natoms * 3):
             mode_dir = wdir.joinpath(f'{i}_mode')
             if not mode_dir.exists():
                 print(f"The folder '{mode_dir.absolute()}' is missing.")
-                bad = 1
+                bad = True
             else:
                 for pm in ['plus', 'minus']:
                     displ_dir = mode_dir.joinpath(f'{pm}/run.abo')
                     if not displ_dir.exists():
                         print(f'There is no .abo file for the {pm} displacement of mode {i} ({displ_dir.absolute()})')
-                        bad = 1
+                        bad = True
                     else:
                         with open(displ_dir.absolute(), 'r') as fl:
                             if all(['Overall time' not in x for x in fl.readlines()]):
                                 print(f'The calculation of the {pm} displacement of the mode {i} is not completed!')
-                        bad = 1
-        if bad == 1:
+                        bad = True
+        if bad == True:
             exit()
         
         txt = ''
@@ -799,37 +799,45 @@ def write_dielectric_tensors(natoms, wdir=Path('./'), atomic=False, outfilepath=
     else: # ATOMIC DISPLACEMENTS
         
         # check that all the atomic displacements are there
-        bad = 0
+        js = ['x', 'y', 'z']
+        ks = [None, 'plus', 'minus'] # the first one is dummy, we just need to start from 1
+        bad = False
         for i in range(1, natoms+1):
-            for d in ['x', 'y', 'z']:
-                displ_dir = wdir.joinpath(f'displacement_{i:0{3}d}_{d}')
-                if not displ_dir.exists():
-                    print(f"The folder '{displ_dir.absolute()}' is missing.")
-                    bad = 1
-                else:
-                    for pm in ['plus', 'minus']:
-                        filepath = displ_dir.joinpath(f'{pm}/run.abo')
-                        if not filepath.exists():
-                            print(f'There is no .abo file for the {pm} displacement of atom {i} along {d} ({filepath.absolute()})')
-                            bad = 1
-                        else:
-                            with open(filepath.absolute()) as fl:
-                                if all(['Overall time' not in x for x in fl.readlines()]):
-                                    print(f'The calculation of the {pm} displacement of the mode {i} is not completed!')
-                                    bad = 1
-        if bad == 1:
+            for j in range(3):
+                for k in [1,2]:
+                    num = natoms*i + 2*j + k
+
+                    displ_dir = wdir.joinpath(f'displacement_{num:0{5}d}_{js[j]}')
+                    if not displ_dir.exists():
+                        print(f"The folder '{displ_dir.absolute()}' is missing.")
+                        bad = True
+
+                    filepath = displ_dir.joinpath('run.abo')
+                    if not filepath.exists():
+                        print(f'There is no .abo file for the {ks[k]}-th displacement of atom {i} along {js[j]} ({filepath.absolute()})')
+                        bad = True
+                    else:
+                        with open(filepath.absolute()) as fl:
+                            if all(['Overall time' not in x for x in fl.readlines()]):
+                                print(f'The calculation of the {ks[k]}-th displacement of atom {i} along {js[j]} ({filepath.absolute()}) is not completed!')
+                                bad = True
+        if bad == True:
             #exit()
             pass
         
         txt = ''
         for i in range(1, natoms+1):
-            for d in ['x', 'y', 'z']:
+            for j in range(3):
+
                 # positive atomic displ.
-                filepath = wdir.joinpath(f'displacement_{i:0{3}d}_{d}/plus/run.abo')
+                k = 1
+                num = natoms*i + 2*j + k
+                filepath = wdir.joinpath(f'displacement_{num:0{5}d}_{js[j]}/run.abo')
                 tens_p = parse_dielectric_tensors(filepath.absolute())
 
                 # negative atomic displ.
-                filepath = wdir.joinpath(f'displacement_{i:0{3}d}_{d}/minus/run.abo')
+                k = 2
+                filepath = wdir.joinpath(f'displacement_{num:0{5}d}_{js[j]}/run.abo')
                 tens_m = parse_dielectric_tensors(filepath.absolute())
 
                 # write both

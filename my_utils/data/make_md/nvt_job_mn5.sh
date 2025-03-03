@@ -1,6 +1,6 @@
 #!/bin/bash
 # Submission script for MareNostrum5
-#SBATCH --job-name=NPT
+#SBATCH --job-name=NVT
 #SBATCH --output=%j.out
 #SBATCH --error=%j.err
 #SBATCH --ntasks=
