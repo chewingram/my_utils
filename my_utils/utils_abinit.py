@@ -2,6 +2,7 @@ import os
 import numpy as np
 from pathlib import Path
 import abc
+import math
 
 from ase.atoms import Atoms
 from ase.data import atomic_numbers
@@ -22,9 +23,28 @@ def extract_structure_for_abinit_input(structure, pseudos_dir, pseudos_names=Non
     inv_atomic_numbers = {str(y): str(x) for x, y in atomic_numbers.items()}
     unique_numbers = sorted(unique_numbers, key=lambda num: inv_atomic_numbers[num])
 
+def extract_structure_for_abinit_input(structure, pseudos_dir, pseudos_names=None, pseudos_extension=None):
+    '''
+    Return a list of lines with acell, rprim, ntypat, znucl, typat, xred
+    '''
+    lines = []
+    cell = structure.get_cell()
+    atom_numbers = structure.get_atomic_numbers()
+    unique_numbers = [str(x) for x in list(set(atom_numbers))]
+    # we need to sort unique_numbers in alphabetic order of the relative chemical symbols
+    inv_atomic_numbers = {str(y): str(x) for x, y in atomic_numbers.items()}
+    unique_numbers = sorted(unique_numbers, key=lambda num: inv_atomic_numbers[num])
+
     ntypat = len(unique_numbers)
     typats = dict(zip( unique_numbers, list(range(1, ntypat+1)) ))
-    typat = ' '.join([f'{typats[str(x)]}' for x in atom_numbers])
+    tmp = [f'{typats[str(x)]}' for x in atom_numbers]
+
+    typat = ''
+    for i in range(int(math.ceil(len(tmp)/50))):
+        typat += ' '.join(tmp[i*50:i*50+50]) + '\n'
+         
+    #typat = ' '.join([f'{typats[str(x)]}' for x in atom_numbers])
+    
     atomic_positions = structure.get_scaled_positions()
     lines = []
         # structure
@@ -41,9 +61,10 @@ def extract_structure_for_abinit_input(structure, pseudos_dir, pseudos_names=Non
     lines.append(f'znucl {" ".join(unique_numbers)}\n')
     lines.append(f'\n')
     lines.append(f'typat\n')
-    lines.append(f'{typat}\n')
+    lines.append(f'{typat}')
     lines.append(f'\n')
     lines.append(f'xred\n')
+
     for position in atomic_positions:
         lines.append(f'{position[0]:.20f} {position[1]:.20f} {position[2]:.20f}\n')
     if pseudos_names is not None:

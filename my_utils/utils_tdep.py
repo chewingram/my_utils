@@ -5,18 +5,18 @@ import sys
 from .utils import from_list_of_numbs_to_text, data_reader, ln_s_f
 import os
 from subprocess import run
-from math import floor
+from math import floor, ceil
 import h5py
 from matplotlib import pyplot as plt
 from pathlib import Path
 import shutil
 from copy import deepcopy as cp
 
-p = Path(shutil.which('extract_forceconstants')).parent
-if p is not None:
-    g_tdep_bin_directory = p
+binpath = shutil.which('extract_forceconstants')
+if binpath is not None:
+    g_tdep_bin_directory = Path(binpath).absolute()
 else:
-    g_tdep_bin_directory = Path('./')
+    g_tdep_bin_directory = Path('./').absolute()
 
 def get_xcart(path):
     '''
@@ -712,6 +712,7 @@ def parse_dielectric_tensors(filepath=Path('run.abo')):
     '''
     Function to parse the dielectric tensor from the abinit abo file
     '''
+    #print(filepath)
     if filepath is not None:
         filepath = Path(filepath)
     with open(filepath.absolute(), 'r') as fl:
@@ -727,7 +728,125 @@ def parse_dielectric_tensors(filepath=Path('run.abo')):
             mat[i,j] = float(extract[i*3 + j].split()[4])
     return mat
 
+
 def write_dielectric_tensors(natoms, wdir=Path('./'), atomic=False, outfilepath=None):
+    '''
+    Function to write the input file for the raman calculation 'infile.dielectric_tensor'.
+    There are two possibilities: atomic displacements and mode displacements.
+    Atomic displacements: the function looks for 3N folders with the name 'displacement_XXX_Y/ZZZ' in the working directory,
+                          where XXX is the number of the atom (starting from 1, max 1000 atoms), Y is the cartesian direction
+                          of displacement (x, y and z), and ZZZ is either 'plus' or 'minus'. Inside each of such directories,
+                          the function looks for a 'run.abo' file and checks if there is the 'Overall time' string inside. If 
+                          everything is ok, then the function extracts all the dielectric tensors (only real parts) writing in
+                          each line a row of the tensor, stacking plus and minus tensors, stacking the pair of tensors (p/m)
+                          for all the atomic displacements.
+    Mode displacements: the function looks for 3N - 3 folders with the name 'X_mode/ZZZ' in the workin directory, where X is 
+                        the index of the optical mode (starting from X=3), and ZZZ is either 'plus' or 'minus'.  Inside each 
+                        of such directories, the function looks for a 'run.abo' file and checks if there is the 'Overall time'
+                        string inside. If everything is ok, then the function extracts all the dielectric tensors (only real
+                        parts) writing in each line a row of the tensor, stacking plus and minus tensors, stacking the pair of
+                        tensors (p/m) for all the mode displacements.
+    '''
+    
+    if wdir is not None:
+        wdir = Path(wdir)
+        
+    if outfilepath is None:
+        outfilepath = wdir.joinpath('infile.dielectric_tensor')
+        
+    if atomic == False: # MODE DISPLACEMENTS
+        # check that all the modes are there
+        bad = 0
+        for i in range(3, natoms * 3):
+            mode_dir = wdir.joinpath(f'{i}_mode')
+            if not mode_dir.exists():
+                print(f"The folder '{mode_dir.absolute()}' is missing.")
+                bad = 1
+            else:
+                for pm in ['plus', 'minus']:
+                    displ_dir = mode_dir.joinpath(f'{pm}/run.abo')
+                    if not displ_dir.exists():
+                        print(f'There is no .abo file for the {pm} displacement of mode {i} ({displ_dir.absolute()})')
+                        bad = 1
+                    else:
+                        with open(displ_dir.absolute(), 'r') as fl:
+                            if all(['Overall time' not in x for x in fl.readlines()]):
+                                print(f'The calculation of the {pm} displacement of the mode {i} is not completed!')
+                        bad = 1
+        if bad == 1:
+            exit()
+        
+        txt = ''
+        for i in range(3, natoms*3):
+            # positive mode displ.
+            filepath = wdir.joinpath(f'{i}_mode/plus/run.abo')
+            tens_p = parse_dielectric_tensors(filepath.absolute())
+            
+            # negative mode displ.
+            filepath = wdir.joinpath(f'{i}_mode/minus/run.abo')
+            tens_m = parse_dielectric_tensors(filepath.absolute())
+            
+            # write both
+            txt += f'{tens_p[0,0]:.5f} {tens_p[0,1]:.5f} {tens_p[0,2]:.5f}\n'
+            txt += f'{tens_p[1,0]:.5f} {tens_p[1,1]:.5f} {tens_p[1,2]:.5f}\n'
+            txt += f'{tens_p[2,0]:.5f} {tens_p[2,1]:.5f} {tens_p[2,2]:.5f}\n'
+            
+            txt += f'{tens_m[0,0]:.5f} {tens_m[0,1]:.5f} {tens_m[0,2]:.5f}\n'
+            txt += f'{tens_m[1,0]:.5f} {tens_m[1,1]:.5f} {tens_m[1,2]:.5f}\n'
+            txt += f'{tens_m[2,0]:.5f} {tens_m[2,1]:.5f} {tens_m[2,2]:.5f}\n'
+        with open(outfilepath.absolute(), 'w') as fl:
+            fl.write(txt)
+            
+            
+    else: # ATOMIC DISPLACEMENTS
+        
+        # check that all the atomic displacements are there
+        bad = 0
+        for i in range(1, natoms+1):
+            for d in ['x', 'y', 'z']:
+                displ_dir = wdir.joinpath(f'displacement_{i:0{3}d}_{d}')
+                if not displ_dir.exists():
+                    print(f"The folder '{displ_dir.absolute()}' is missing.")
+                    bad = 1
+                else:
+                    for pm in ['plus', 'minus']:
+                        filepath = displ_dir.joinpath(f'{pm}/run.abo')
+                        if not filepath.exists():
+                            print(f'There is no .abo file for the {pm} displacement of atom {i} along {d} ({filepath.absolute()})')
+                            bad = 1
+                        else:
+                            with open(filepath.absolute()) as fl:
+                                if all(['Overall time' not in x for x in fl.readlines()]):
+                                    print(f'The calculation of the {pm} displacement of the mode {i} is not completed!')
+                                    bad = 1
+        if bad == 1:
+            #exit()
+            pass
+        
+        txt = ''
+        for i in range(1, natoms+1):
+            for d in ['x', 'y', 'z']:
+                # positive atomic displ.
+                filepath = wdir.joinpath(f'displacement_{i:0{3}d}_{d}/plus/run.abo')
+                tens_p = parse_dielectric_tensors(filepath.absolute())
+
+                # negative atomic displ.
+                filepath = wdir.joinpath(f'displacement_{i:0{3}d}_{d}/minus/run.abo')
+                tens_m = parse_dielectric_tensors(filepath.absolute())
+
+                # write both
+                txt += f'{tens_p[0,0]:.5f} {tens_p[0,1]:.5f} {tens_p[0,2]:.5f}\n'
+                txt += f'{tens_p[1,0]:.5f} {tens_p[1,1]:.5f} {tens_p[1,2]:.5f}\n'
+                txt += f'{tens_p[2,0]:.5f} {tens_p[2,1]:.5f} {tens_p[2,2]:.5f}\n'
+
+                txt += f'{tens_m[0,0]:.5f} {tens_m[0,1]:.5f} {tens_m[0,2]:.5f}\n'
+                txt += f'{tens_m[1,0]:.5f} {tens_m[1,1]:.5f} {tens_m[1,2]:.5f}\n'
+                txt += f'{tens_m[2,0]:.5f} {tens_m[2,1]:.5f} {tens_m[2,2]:.5f}\n'
+        with open(outfilepath.absolute(), 'w') as fl:
+            fl.write(txt)
+
+            
+def new_write_dielectric_tensors(natoms, wdir=Path('./'), atomic=False, outfilepath=None): # ONLY FOR LATEST COMMITS OF TOOLS.TDEP
     '''
     Function to write the input file for the raman calculation 'infile.dielectric_tensor'.
     There are two possibilities: atomic displacements and mode displacements.
@@ -922,3 +1041,92 @@ def write_lotofile(inpath, outpath='./infile.lotosplitting'):
             txt += f'{bec[i,0]:.10f} {bec[i,1]:.10f} {bec[i,2]:.10f}\n'
     with open(outpath.absolute(), 'w') as fl:
         fl.write(txt)
+
+def convergence_tdep_mdlen(
+        temperature,
+        root_dir='./',
+        folderbin = '',
+        nproc = 1,
+        refine_cell = True,
+        nthrow = 0,
+        rc2 = 10,
+        rc3 = 5,
+        U0 = True,
+        qg = 32,
+        traj_path = './Trajectory.traj',
+        step=10,
+        uc_path = 'unitcell.json',
+        mult_mat = [[1,0,0],[0,1,0],[0,0,1]],
+        job=False,
+        job_template=None):
+    
+    template = Path(__file__).parent.joinpath('data/conv_tdep/Run_tdep_template.py')
+    with open(template, 'r') as fl:
+        lines = fl.readlines()
+    
+    index_wdir = None
+    index_index = None
+    
+    for i in range(27):
+        if 'wdir' in lines[i]:
+            index_wdir = i
+        elif 'folderbin' in lines[i]:
+            lines[i] = f"folderbin = '{folderbin.absolute()}'"
+        elif 'nproc' in lines[i]:
+            lines[i] = f'nproc = {nproc}'
+        elif 'refine_cell' in lines[i]:
+            lines[i] = f'refine_cell = {refine_cell}'
+        elif 'nthrow' in lines[i]:
+            lines[i] = f'nthrow = {nthrow}'
+        elif 'rc2' in lines[i]:
+            lines[i] = f'rc2 = {rc2}'
+        elif 'rc3' in lines[i]:
+            lines[i] = f'rc3 = {rc3}'
+        elif 'U0' in lines[i]:
+            lines[i] = f'U0 = {U0}'
+        elif 'qg' in lines[i]:
+            lines[i] = f'qg = {qg}'
+        elif 'traj_path' in lines[i]:
+            lines[i] = f"traj_path = '{traj_path.absolute()}'"
+        elif 'uc_path' in lines[i]:
+            lines[i] = f"uc_path = '{uc_path.absolute()}'"
+        elif 'mult_mat' in lines[i]:
+            lines[i] = f'mult_mat = [[{mult_mat[0][0]}, {mult_mat[0][1]}, {mult_mat[0][2]}], '
+            lines[i] += f'[{mult_mat[1][0]}, {mult_mat[1][1]}, {mult_mat[1][2]}], '
+            lines[i] += f'[{mult_mat[2][0]}, {mult_mat[2][1]}, {mult_mat[2][2]}]]'
+        elif 'temperature' in lines[i]:
+            lines[i] = f'temperature = {temperature}'
+        elif 'index' in lines[i]:
+            index_index = i
+        else:
+            continue
+        lines[i] += '\n'
+
+        
+    
+
+
+    root_dir = Path(root_dir)
+    root_dir.mkdir(parents=True, exist_ok=True)
+
+    conv_dir = root_dir.joinpath('Convergence_tdep')
+    conv_dir.mkdir(parents=True, exist_ok=True)
+    
+    ats = read(traj_path, index=':')
+    nconfs = len(ats)
+    if nconfs < step:
+        raise ValueError('nstep must be < than the number of confs in the trajectory file!')
+    indices = [step*i for i in range(1, ceil(nconfs/step)+1)]
+
+    for index in indices:
+        inst_dir = conv_dir.joinpath(f'{index}_instance')
+        inst_dir.mkdir(parents=True, exist_ok=True)
+        lines[index_index] = f"index = {index}\n"
+        lines[index_wdir] = f"wdir = '{inst_dir.absolute()}'\n"
+        with open(inst_dir.joinpath('Run_Tdep.py'), 'w') as fl:
+            fl.writelines(lines)
+        if job == True:
+            shutil.copy(Path(job_template).absolute(), inst_dir)
+
+
+    
