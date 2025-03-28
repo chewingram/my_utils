@@ -817,7 +817,7 @@ def write_dielectric_tensors(natoms, wdir=Path('./'), atomic=False, outfilepath=
                         else:
                             with open(filepath.absolute()) as fl:
                                 if all(['Overall time' not in x for x in fl.readlines()]):
-                                    print(f'The calculation of the {pm} displacement of the mode {i} is not completed!')
+                                    print(f'The calculation of the {pm} displacement of the mode {i} along {d} is not completed!')
                                     bad = 1
         if bad == 1:
             #exit()
@@ -926,7 +926,7 @@ def new_write_dielectric_tensors(natoms, wdir=Path('./'), atomic=False, outfilep
                 for k in [1,2]:
                     num = natoms*(i-1) + 2*j + k
 
-                    displ_dir = wdir.joinpath(f'displacement_{num:0{5}d}_{js[j]}')
+                    displ_dir = wdir.joinpath(f'displacement_{num:0{5}d}_{js[j]}_{ks[k]}')
                     if not displ_dir.exists():
                         print(f"The folder '{displ_dir.absolute()}' is missing.")
                         bad = True
@@ -951,12 +951,13 @@ def new_write_dielectric_tensors(natoms, wdir=Path('./'), atomic=False, outfilep
                 # positive atomic displ.
                 k = 1
                 num = natoms*(i-1) + 2*j + k
-                filepath = wdir.joinpath(f'displacement_{num:0{5}d}_{js[j]}/run.abo')
+                filepath = wdir.joinpath(f'displacement_{num:0{5}d}_{js[j]}_plus/run.abo')
                 tens_p = parse_dielectric_tensors(filepath.absolute())
 
                 # negative atomic displ.
                 k = 2
-                filepath = wdir.joinpath(f'displacement_{num:0{5}d}_{js[j]}/run.abo')
+                num += 1
+                filepath = wdir.joinpath(f'displacement_{num:0{5}d}_{js[j]}_minus/run.abo')
                 tens_m = parse_dielectric_tensors(filepath.absolute())
 
                 # write both
@@ -1045,7 +1046,7 @@ def write_lotofile(inpath, outpath='./infile.lotosplitting'):
 def convergence_tdep_mdlen(
         temperature,
         root_dir='./',
-        folderbin = '',
+        folderbin = Path(g_tdep_bin_directory),
         nproc = 1,
         refine_cell = True,
         nthrow = 0,
@@ -1123,10 +1124,11 @@ def convergence_tdep_mdlen(
         inst_dir.mkdir(parents=True, exist_ok=True)
         lines[index_index] = f"index = {index}\n"
         lines[index_wdir] = f"wdir = '{inst_dir.absolute()}'\n"
-        with open(inst_dir.joinpath('Run_Tdep.py'), 'w') as fl:
+        with open(inst_dir.joinpath('RunTdep.py'), 'w') as fl:
             fl.writelines(lines)
         if job == True:
             shutil.copy(Path(job_template).absolute(), inst_dir)
+            run(f'sbatch {Path(job_template).name}', cwd=inst_dir, shell=True)
 
 
     

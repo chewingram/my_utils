@@ -6,6 +6,7 @@ my_utils/phonon_utils.py
 my_utils/utils.py
 my_utils/utils_abinit.py
 my_utils/utils_cross_validation.py
+my_utils/utils_cross_validation_parallel.py
 my_utils/utils_graphs.py
 my_utils/utils_md.py
 my_utils/utils_mlip.py
@@ -17,3 +18,4 @@ my_utils.egg-info/SOURCES.txt
 my_utils.egg-info/dependency_links.txt
 my_utils.egg-info/entry_points.txt
 my_utils.egg-info/top_level.txt
+my_utils/ongoing/__init__.py

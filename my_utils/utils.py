@@ -6,6 +6,7 @@ import sys
 import shutil 
 import numbers
 from pathlib import Path
+from PIL import Image
 import logging
 from scipy.stats import linregress
 from ase.io import read, write
@@ -648,3 +649,120 @@ def at_extract(*argv):
         raise ValueError('Please use a valid index or slice of indices')
     
     write(savename, extr)
+
+def giffy(*argv):
+    
+    def create_tmp_dir(i=0):
+        dir = Path(f'tmp{i}')
+        if dir.is_dir():
+            return create_tmp_dir(i=i+1)
+        dir.mkdir(parents=True, exist_ok=True)
+        return dir.absolute()
+    
+
+    help_msg = 'This script makes a gif out of an ASE trajectory.\n'
+    help_msg += 'The following arguments have to be given:\n1. Path to the trajectory;\n2. Slicing for the structures (e.g. "[:100:3]");\n'
+    help_msg += '3. Fps of the gif;\n4. (optional) the rotations around the axes separated by comma and between quotation marks'
+    help_msg += ' in the format "Ax", where A is the angle and x is the axis and the order is from left to right (e.g. "45x, 60z, 120z").'
+    help_msg += ' Note that at each rotation the reference system stays fixed!\n'
+    help_msg += '5. (optional) Output file name;\n'
+
+
+    if len(sys.argv) == 1:
+        print(help_msg)
+        exit()
+
+    if len(sys.argv) < 4:
+        ValueError('At least three arguments are expected: path of the trajectory, the slicing and the fps')
+
+    if sys.argv[1] in ['--help', '-help', '--h', '-h']:
+        print(help_msg)
+        exit()
+
+    trajfile = sys.argv[1]
+    fps = int(sys.argv[3])
+    slicing = sys.argv[2]
+    if len(sys.argv) >= 5:
+        rotation = sys.argv[4]
+    else:
+        rotation = "0x"
+    if len(sys.argv) >= 6:
+        filename = sys.argv[5]
+    else:
+        filename = 'movie.gif'
+
+    duration = 1000/fps 
+    
+    # Create a tmp directory image directory
+    imgdir = create_tmp_dir() # returns the path to the tmp dir
+    ats = read(trajfile, index=':')
+
+    if slicing == ':' or slicing == '[:]':
+        ats = ats[:]
+    elif slicing[0] == '[' and slicing[-1] == ']':
+        nums = [x for x in slicing[1:-1].split(':')]
+        if len(nums) == 2:
+            k = "1"
+        elif len(nums) == 3:
+            k = nums[2]
+        else:
+            ValueError('The slicing must be ":" or of the format "[n:m]" or "[n:m:l]"!')
+        if nums[0] == "":
+            n = 0
+        else:
+            n = int(nums[0])
+        if nums[1] == "":
+            m = -1
+        else:
+            m = int(nums[1])
+        if nums[2] == "":
+            k = 1
+        else:
+            k = int(k)
+        ats = ats[n:m:k]
+    else:
+        ValueError('The slicing must be ":" or of the format "[n:m]" or "[n:m:l]"!')
+
+
+    imgpaths = []
+    for i, at in enumerate(ats):
+        imgpaths.append(imgdir.joinpath(f'img_{i}.png'))
+        write(imgpaths[-1], at, format='png', rotation=rotation) 
+    # Get and numerically sort image paths
+    # imgpaths = sorted(imgdir.glob("img_*.png"), key=lambda x: int(str(x).split('_')[1].split('.')[0]))
+
+    # Determine the maximum frame dimensions
+    widths, heights = zip(*(Image.open(p).size for p in imgpaths))
+    max_width = max(widths)
+    max_height = max(heights)
+
+    # Load, center, and pad frames
+    frames = []
+    for path in imgpaths:
+        im = Image.open(path).convert("RGBA")
+        
+        # Create white canvas with max dimensions
+        bg = Image.new("RGBA", (max_width, max_height), (255, 255, 255, 255))
+        
+        # Center the image on the canvas
+        x = (max_width - im.width) // 2
+        y = (max_height - im.height) // 2
+        bg.paste(im, (x, y), im)  # Use alpha channel as mask
+
+        frames.append(bg.convert("P"))
+
+    # Save as animated GIF
+    frames[0].save(
+        filename,
+        format="GIF",
+        save_all=True,
+        append_images=frames[1:],
+        duration=duration,  # ms per frame
+        loop=0,        # loop forever
+        disposal=2     # clear previous frame
+    )
+
+    [x.unlink() for x in imgpaths]
+
+    imgdir.rmdir()
+    print(f"GIF saved as {filename}")

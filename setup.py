@@ -15,6 +15,7 @@ setup(
             "atlen = my_utils.utils:atlen",
             "wrap = my_utils.utils_md:wrap",
             "at_extract = my_utils.utils:at_extract",
+            "giffy = my_utils.utils:giffy",
         ],
     },
     classifiers=[
