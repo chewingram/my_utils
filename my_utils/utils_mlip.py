@@ -9,7 +9,7 @@ from copy import deepcopy as cp
 
 import sys
 
-from .utils import data_reader, cap_first, repeat, warn, from_list_to_text, mae, rmse, R2, low_first, path
+from .utils import data_reader, cap_first, repeat, warn, from_list_to_text, mae, rmse, R2 as R2_func, low_first, path
 from .Graphics_matplotlib import Histogram
 
 
@@ -58,11 +58,12 @@ def plot_correlations(dtset_ind, ind, dir='', offsets=None, save=False, units=No
     
     
     ss_res = sum([(float(x[0])-float(x[1]))**2 for x in data[2:]])
-    avg_DFT = sum([float(x[0]) for x in data[2:]])
-    avg_DFT = avg_DFT/(len(data)-2)
-    ss_tot = sum([(float(x[0]) - avg_DFT)**2 for x in data[2:]])
-    R2 = 1 - ss_res/ss_tot
-    txt = f"rmse: {rmse} {units[ind]}\nmae: {mae} {units[ind]}\nR$^2$: {str(round(R2, 4))}"
+    # avg_DFT = sum([float(x[0]) for x in data[2:]])
+    # avg_DFT = avg_DFT/(len(data)-2)
+    # ss_tot = sum([(float(x[0]) - avg_DFT)**2 for x in data[2:]])
+    # R2_v = 1 - ss_res/ss_tot
+    R2_v = R2(x_data, y_data)
+    txt = f"rmse: {rmse} {units[ind]}\nmae: {mae} {units[ind]}\nR$^2$: {str(round(R2_v, 4))}"
     x_data = np.array([float(pip[0]) for pip in data[2:]])
     y_data = np.array([float(pip[1]) for pip in data[2:]])
     n = 2.3
