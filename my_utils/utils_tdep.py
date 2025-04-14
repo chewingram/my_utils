@@ -1055,11 +1055,16 @@ def convergence_tdep_mdlen(
         U0 = True,
         qg = 32,
         traj_path = './Trajectory.traj',
-        step=10,
+        size_step=10,
+        max_stride=100,
+        stride_step=8,
         uc_path = 'unitcell.json',
         mult_mat = [[1,0,0],[0,1,0],[0,0,1]],
         job=False,
         job_template=None):
+    
+    '''Run Tdep with increasing sampling size and stride to assess convergence.
+    The two parameters are converged separately: stride is converged with the maximum size and the size is converged with the minimum stride'''
     
     template = Path(__file__).parent.joinpath('data/conv_tdep/Run_tdep_template.py')
     with open(template, 'r') as fl:
@@ -1099,6 +1104,8 @@ def convergence_tdep_mdlen(
             lines[i] = f'temperature = {temperature}'
         elif 'index' in lines[i]:
             index_index = i
+        elif 'nslice' in lines[i]:
+            index_slice = i
         else:
             continue
         lines[i] += '\n'
@@ -1115,15 +1122,36 @@ def convergence_tdep_mdlen(
     
     ats = read(traj_path, index=':')
     nconfs = len(ats)
-    if nconfs < step:
+    if nconfs < size_step:
         raise ValueError('nstep must be < than the number of confs in the trajectory file!')
-    indices = [step*i for i in range(1, ceil(nconfs/step)+1)]
+    indices = [size_step*i for i in range(1, ceil(nconfs/size_step)+1)]
 
+    
+    # deal with the sizes and minimum stride (=1)
+    sizes_dir = conv_dir.joinpath('sampling_size')
+    sizes_dir.mkdir(parents=True, exist_ok=True)
     for index in indices:
-        inst_dir = conv_dir.joinpath(f'{index}_instance')
+        inst_dir = conv_dir.joinpath(f'{index}_size')
         inst_dir.mkdir(parents=True, exist_ok=True)
         lines[index_index] = f"index = {index}\n"
         lines[index_wdir] = f"wdir = '{inst_dir.absolute()}'\n"
+        lines[index_slice] = f"nslice = 1\n"
+        with open(inst_dir.joinpath('RunTdep.py'), 'w') as fl:
+            fl.writelines(lines)
+        if job == True:
+            shutil.copy(Path(job_template).absolute(), inst_dir)
+            run(f'sbatch {Path(job_template).name}', cwd=inst_dir, shell=True)
+
+    # deal with the strides and maximum size
+    strides_dir = conv_dir.joinpath('strides')
+    strides_dir.mkdir(parents=True, exist_ok=True)
+    strides = [x for x in range(1, max_stride, stride_step)]
+    for stride in strides:
+        inst_dir = conv_dir.joinpath(f'{stride}_stride')
+        inst_dir.mkdir(parents=True, exist_ok=True)
+        lines[index_index] = f"index = {indices[-1]}\n"
+        lines[index_wdir] = f"wdir = '{inst_dir.absolute()}'\n"
+        lines[index_slice] = f"nslice = 1\n"
         with open(inst_dir.joinpath('RunTdep.py'), 'w') as fl:
             fl.writelines(lines)
         if job == True:

@@ -146,12 +146,18 @@ def deconvolve_spectrum(x,
                         prec_par=3,
                         print_pars=True,
                         plot_things=True):
+    '''Deconvolve spectrum with custom functions.
+
+    Parameters
+    ----------
+    x: 
+    '''
 
     if check_npeaks is True:
         crit_list = peak_finder(x_sp, y_sp)
-        if len(crit_list) > nlor:
-            print(f'More then {nlor} peaks have been found, that is {len(crit_list)}, so {len(crit_list)} lorentzians will be used.')
-            nlor = len(crit_list)
+        if len(crit_list) > nfuncs:
+            print(f'More then {nfuncs} peaks have been found, that is {len(crit_list)}, so {len(crit_list)} lorentzians will be used.')
+            nfuncs = len(crit_list)
 
     if remove_baseline is True:
         #BASELINE
@@ -193,7 +199,7 @@ def deconvolve_spectrum(x,
                 # 
                 # first, find the position of the center parameter in the list of paramters for the current function
                 c_i = dict_centers[func_names[i]] 
-                # second, find the peaks and take point with the maximum value of y 
+                # second, find the peaks and take the point with the maximum value of y 
                 crit_list = peak_finder(x_sp, residue)
                 curr_center = crit_list[np.argmax(crit_list[:,2])]
                 # third, change the center parameter

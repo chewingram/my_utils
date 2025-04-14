@@ -21,6 +21,7 @@ uc_path
 mult_mat
 temperature
 index
+nslice
 
 
 
@@ -43,7 +44,8 @@ runtdp = RunTdep(uc,
                  folderbin=folderbin,
                  nproc=nproc,
                  refine_cell=refine_cell,
-                 nthrow=nthrow)
+                 nthrow=nthrow,
+                 nslice=nslice)
 
 runtdp.run(options_forceconstant=dict(rc2 = rc2,
                                       rc3 = rc3,
