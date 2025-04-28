@@ -11,6 +11,7 @@ my_utils/utils_graphs.py
 my_utils/utils_md.py
 my_utils/utils_mlip.py
 my_utils/utils_scheduler.py
+my_utils/utils_spectra.py
 my_utils/utils_stdep.py
 my_utils/utils_tdep.py
 my_utils.egg-info/PKG-INFO

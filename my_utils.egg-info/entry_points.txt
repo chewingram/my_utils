@@ -1,6 +1,7 @@
 [console_scripts]
 at_extract = my_utils.utils:at_extract
 atlen = my_utils.utils:atlen
+chemform = my_utils.utils_md:chemform
 giffy = my_utils.utils:giffy
 make_md = my_utils.utils_md:make_md
 wrap = my_utils.utils_md:wrap

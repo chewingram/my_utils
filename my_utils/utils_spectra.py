@@ -3,10 +3,13 @@ from matplotlib import pyplot as plt
 from ipywidgets import interact
 import random
 import scipy
+from copy import deepcopy as cp
 from scipy.interpolate import CubicSpline
 from scipy.optimize import curve_fit
 import os
 from pathlib import Path
+from .utils import repeat
+from scipy.signal import find_peaks, peak_widths
 
 def gaussian_2D(x, pref, mean, std):
     if isinstance(x, list):
@@ -28,7 +31,42 @@ def lorentzian_2D(x, area, center, gamma):
         raise TypeError('You must provide a list or a numpy array!')
     return area * 1/(np.pi) * (gamma/2) / ((x-center)**2 + (gamma/2)**2)
 
+def find_indices(values, array):
+    """
+    Find indices in `array` corresponding to the closest values to the given `values`.
 
+    For each element in `values`, this function finds the index in `array` where the
+    absolute difference is minimal.
+
+    Parameters
+    ----------
+    values : array_like
+        A list or array of values to search for in `array`.
+    array : array_like
+        The array in which to find the closest match to each value in `values`.
+
+    Returns
+    -------
+    inds : ndarray of int
+        Array of indices such that `array[inds[i]]` is the closest value in `array` to `values[i]`.
+
+    Notes
+    -----
+    Both `values` and `array` are internally converted to NumPy arrays (via deep copy) to ensure safe computation.
+
+    Examples
+    --------
+    >>> find_indices([2.1, 4.8], [1.0, 2.0, 3.0, 5.0])
+    array([1, 3])
+    """
+    values = np.array(cp(values))
+    array = np.array(cp(array))
+    inds = []
+    for value in values:
+        inds.append(np.argmin(np.abs(array-value)))
+    inds = np.array(inds)
+    return inds
+            
 
 def sum_operation(args):
     return sum(args)
@@ -36,28 +74,65 @@ def sum_operation(args):
 def boh(args):
     return args[0] + 3* (args[1])
 
-def peak_finder(x, ref_yy):
-    crit_list = []
-    for i in range(1, len(ref_yy)-1):
-        if ref_yy[i]>= ref_yy[i-1] and ref_yy[i] >= ref_yy[i+1]:# or ref_yy[i]<= ref_yy[i-1] and ref_yy[i] <= ref_yy[i+1]:
-            crit_list.append([i, x[i], ref_yy[i]])
+def peak_finder(x, ref_yy, n_peaks=None):
+    """
+    Identify peaks in the signal and return their indices, x, and y values.
+
+    Parameters
+    ----------
+    x : array_like
+        The x-values of the data.
+    ref_yy : array_like
+        The y-values of the signal.
+    n_peaks : int or None
+        Number of top peaks to return, sorted by peak height. If None, return all peaks.
+
+    Returns
+    -------
+    ndarray of shape (N, 3)
+        Each row contains [index, x[index], ref_yy[index]], sorted by increasing energy.
+    """
+    idxs = find_peaks(ref_yy)[0]
+    idxs = idxs[np.argsort(x[idxs])]  # sort by increasing energy
+    if n_peaks is not None:
+        idxs = idxs[:n_peaks]
+
+    crit_list = [[i, x[i], ref_yy[i]] for i in idxs]
     return np.array(crit_list)
     
 def fwhm_finder(x, ref_yy, x_max):
-    '''
-    '''
-    data = np.array([[z,y] for z, y in zip(x, ref_yy)], dtype='float')
+    """
+    Estimate the full width at half maximum (FWHM) around a given x_max.
+
+    Parameters
+    ----------
+    x : array_like
+        x-values of the signal.
+    ref_yy : array_like
+        y-values of the signal.
+    x_max : float
+        x-position near the peak of interest.
+
+    Returns
+    -------
+    fwhm : float
+        Full width at half maximum.
+    i_l : int
+        Index of the left half-max point.
+    i_r : int
+        Index of the right half-max point.
+    """
+    data = np.array([x, ref_yy], dtype='float').T
     data = data[np.argsort(data[:,0])]
     x = data.T[0]
     y = data.T[1]
     
-    max_i = np.argmin(np.array([abs(x-x_max)]))
-    x_max = x[max_i]
-    y_max = y[max_i]
-    hm = y_max/2
+    max_i = np.argmin(np.abs(x - x_max))
     
-    i_l = np.argmin(np.array([abs(y[:max_i]-hm)]))
-    i_r = np.argmin(np.array([abs(y[max_i+1:]-hm)])) + max_i + 1
+    hm = y[max_i]/2
+    
+    i_l = np.argmin(np.abs(y[:max_i]-hm))
+    i_r = np.argmin(np.abs(y[max_i+1:]-hm)) + max_i + 1
     fwhm = x[i_r] - x[i_l]
     return [fwhm, i_l, i_r]
 
@@ -115,6 +190,47 @@ dict_width = {
 
 
 def stable_cubic_spline(x_p, y_p, bc_type='not-a-knot', ltl=1, rtl=1, lts=1, rts=1):   
+    """
+    Create a stabilized cubic spline interpolator by adding flat tails to the input data.
+
+    This function extends the input data with constant-value tails on both the left and
+    right sides, which helps reduce extrapolation artifacts and ensures more stable
+    behavior of the cubic spline near the boundaries.
+
+    Parameters
+    ----------
+    x_p : array_like
+        1D array of x-values for the original data points. Must be increasing.
+    y_p : array_like
+        1D array of y-values corresponding to `x_p`.
+    bc_type : str or 2-tuple, optional
+        Boundary condition passed to `scipy.interpolate.CubicSpline`. Default is 'not-a-knot'.
+    ltl : float, optional
+        Length of the left tail (in x-units). Default is 1.
+    rtl : float, optional
+        Length of the right tail (in x-units). Default is 1.
+    lts : float, optional
+        Step size used to discretize the left tail. Default is 1.
+    rts : float, optional
+        Step size used to discretize the right tail. Default is 1.
+
+    Returns
+    -------
+    scipy.interpolate.CubicSpline
+        A cubic spline object defined over the extended domain with stabilized tails.
+
+    Notes
+    -----
+    The added tails have constant y-values equal to the first and last values of `y_p`.
+    This is useful to avoid spline overshoot or unstable extrapolation near the edges.
+
+    Examples
+    --------
+    >>> x = np.array([0, 1, 2])
+    >>> y = np.array([0, 1, 0])
+    >>> spline = stable_cubic_spline(x, y, ltl=2, rtl=2)
+    >>> spline(-1), spline(1), spline(3)  # evaluate in and outside the original range
+    """
     
     # create the tails
     lt = np.arange(0, ltl, lts) - ltl + x_p[0] # left tail
@@ -137,7 +253,9 @@ def deconvolve_spectrum(x,
                         nfuncs, 
                         func_names, 
                         check_npeaks=False,
+                        n_peaks=None,
                         remove_baseline=True,
+                        baseline_sampling=None,
                         offset=True,
                         mode='sequential',
                         centers=False,
@@ -154,15 +272,21 @@ def deconvolve_spectrum(x,
     '''
 
     if check_npeaks is True:
-        crit_list = peak_finder(x_sp, y_sp)
+        crit_list = peak_finder(x, y)
         if len(crit_list) > nfuncs:
-            print(f'More then {nfuncs} peaks have been found, that is {len(crit_list)}, so {len(crit_list)} lorentzians will be used.')
+            print(f'More then {nfuncs} peaks have been found, that is {len(crit_list)}, so {len(crit_list)-nfuncs} extra {dict_print_names[func_names[-1]]} functions will be used.')
+            func_names.extend(repeat(func_names[-1], len(crit_list)-nfuncs))
             nfuncs = len(crit_list)
 
     if remove_baseline is True:
         #BASELINE
+        if baseline_sampling == None:
+            raise ValueError('An array or list with the sampling x values for the baselines must be given!')
+        elif not isinstance(baseline_sampling, (list, np.ndarray)):
+            raise TypeError('baseline_sampling must be an array or list!')
         # create baseline
-        i_p = np.array([1, 10, 15, 50, 110])
+        i_p = find_indices(np.array(baseline_sampling), x)
+        #i_p = np.array([1, 10, 15, 50, 110])
 
         x_p = np.zeros(len(i_p))
         for i in range(len(i_p)):
@@ -179,11 +303,15 @@ def deconvolve_spectrum(x,
         # subtract baseline
         x_sp = x.copy()
         y_sp = y.copy() - y_bl
+    else:
+        x_sp = x.copy()
+        y_sp = y.copy()
 
 
     if offset is True:
         #OFFSET
-        y_sp -= min(y_sp)
+        offset = min(y_sp)
+        y_sp -= offset
 
 
 
@@ -193,27 +321,30 @@ def deconvolve_spectrum(x,
         residue = y_sp.copy()
         opt_pars = []
         for i in range(nfuncs):
-
+            # find the highest peak in the residue
+            crit_point = peak_finder(x_sp, residue)
+            print(f'crit point for f.1: {crit_point}')
+            print(f'crit_point[:,2]: {crit_point[:,2]}')
+            crit_point = crit_point[np.argsort(crit_point[:,2])[::-1]][0] # [i, x[i], y[i]]
+            #print(f'crit point for f.1: {crit_point}')
             if centers == True:
                 # modify the "center" parameter of the function in order to make it align with the highest peak in the current residue
                 # 
                 # first, find the position of the center parameter in the list of paramters for the current function
                 c_i = dict_centers[func_names[i]] 
-                # second, find the peaks and take the point with the maximum value of y 
-                crit_list = peak_finder(x_sp, residue)
-                curr_center = crit_list[np.argmax(crit_list[:,2])]
-                # third, change the center parameter
-                pars[i][c_i] = curr_center[1]
+                # second, convert the peak center (max position) into the the center parameter of the model function
+                curr_center_par = crit_point[1] # to be adapted to functions
+                # fourth, change the center parameter
+                pars[i][c_i] = curr_center_par
 
             if width == True:
                 # modify the "width" parameter of the function in order to make it equal to the FWHM of the peak
                 #
                 # first, find the position of the width parameter in the list of paramters for the current function
                 w_i = dict_width[func_names[i]]  
-                # second, find the peaks and take point with the maximum value of y 
-                crit_list = peak_finder(x_sp, residue)
-                curr_center = crit_list[np.argmax(crit_list[:,2])] # [index, x, y]
-                fwhm = fwhm_finder(x_sp, residue, curr_center[1])[0] 
+                
+                fwhm = peak_widths(y_sp, peaks=np.array([crit_point[0]], dtype='int'))[0][0] # 4, n_peaks (we want the first info, which is the width, and n_peaks=1)
+
                 # third, change the center parameter
                 pars[i][w_i] = fwhm
 
@@ -222,10 +353,7 @@ def deconvolve_spectrum(x,
                 #
                 # first, find the position of the width parameter in the list of paramters for the current function
                 p_i = dict_area[func_names[i]]   
-                # second, find the peaks and take point with the maximum value of y 
-                crit_list = peak_finder(x_sp, residue)
-                curr_center = crit_list[np.argmax(crit_list[:,2])] # [index, x, y]
-                pref = curr_center[2]
+                pref = crit_point[2]
                 # third, change the area parameter
                 pars[i][p_i] = pref
 
@@ -314,7 +442,7 @@ def deconvolve_spectrum(x,
 
         for i in range(nfuncs):
             txt += f'+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-\n'
-            txt += f'Function 1: {dict_print_names[func_names[i]]}\n'
+            txt += f'Function {i+1}: {dict_print_names[func_names[i]]}\n'
             for j in range(len(opt_pars[i])):
                 txt += f'\t-par. {j} = {opt_pars[i][j]:0.{prec_par}f}\n'
             txt += f'------------------------------------------------------------\n'
@@ -329,13 +457,18 @@ def deconvolve_spectrum(x,
         plt.plot(x_sp, final_fit, label='Fit')
         plt.plot(x_sp, final_res, label='Residue')
 
+        if remove_baseline == True:
+            plt.figure()
+            plt.plot(x_sp, y_sp+y_bl, label='Ref. data')
+            plt.plot(x_sp, y_bl-offset, label='baseline')
+            plt.plot(x_sp, final_fit+y_bl, label='Fit')
+            plt.plot(x_sp, final_res, label='Residue')
+
         plt.legend()
 
         plt.figure()
         for i in range(nfuncs):
             plt.plot(x_sp, dict_fnames[func_names[i]](x_sp, *opt_pars[i]), label=f'Function n. {i+1}')
         plt.legend()
-    
     return opt_pars
-
 

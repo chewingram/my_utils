@@ -1131,7 +1131,7 @@ def convergence_tdep_mdlen(
     sizes_dir = conv_dir.joinpath('sampling_size')
     sizes_dir.mkdir(parents=True, exist_ok=True)
     for index in indices:
-        inst_dir = conv_dir.joinpath(f'{index}_size')
+        inst_dir = sizes_dir.joinpath(f'{index}_size')
         inst_dir.mkdir(parents=True, exist_ok=True)
         lines[index_index] = f"index = {index}\n"
         lines[index_wdir] = f"wdir = '{inst_dir.absolute()}'\n"
@@ -1147,7 +1147,7 @@ def convergence_tdep_mdlen(
     strides_dir.mkdir(parents=True, exist_ok=True)
     strides = [x for x in range(1, max_stride, stride_step)]
     for stride in strides:
-        inst_dir = conv_dir.joinpath(f'{stride}_stride')
+        inst_dir = strides_dir.joinpath(f'{stride}_stride')
         inst_dir.mkdir(parents=True, exist_ok=True)
         lines[index_index] = f"index = {indices[-1]}\n"
         lines[index_wdir] = f"wdir = '{inst_dir.absolute()}'\n"

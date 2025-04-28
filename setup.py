@@ -16,6 +16,7 @@ setup(
             "wrap = my_utils.utils_md:wrap",
             "at_extract = my_utils.utils:at_extract",
             "giffy = my_utils.utils:giffy",
+            "chemform = my_utils.utils_md:chemform",
         ],
     },
     classifiers=[

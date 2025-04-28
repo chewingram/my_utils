@@ -213,10 +213,10 @@ def run_md(ismpi = False,
             new_ucell.set_cell(cell, True)
             write(wdir.joinpath(f'T{temperature}K_unitcell.json').absolute(), new_ucell) # write the cell into a file
 
-        # if it is NVT and the trajectory is not there, then let us create a calculator and a new trajectory
+        # if it is NVT, then let us create a calculator and a new trajectory
         # file in which we can store all the configurations we got wit the MD along with their energy computes with the
         # calculator.
-        elif not wdir.joinpath(f'T{temperature}K.traj').exists():
+        else:
             newtraj = reconstruct_mlmd_trajectory(workdir.joinpath('Trajectory/mlmd.traj').absolute(), workdir.joinpath('Trajectory/mlmd.log').absolute())[nthrow:]
             write(wdir.joinpath(f'T{temperature}K.traj').absolute(), newtraj)
             #traj = reconstruct_mlmd_trajectory(f'{workdir}mlmd.traj', f'{workdir}mlmd.log')[nthrow:]
@@ -228,8 +228,6 @@ def run_md(ismpi = False,
             #    at.calc = calc
             #    at.get_potential_energy()
             #    newtraj.write(at)
-        else:
-            pass
 
 
     
@@ -637,6 +635,13 @@ def time_convergence_npt(traj, mult_mat=np.eye(3), units=['$\AA$', 'fs']):
     
     fig.set_suptitle('Cell parameters for the thermalized unitcell vs. time of simulation')
     
+def chemform():
+    if len(sys.argv) > 1:
+        filepath = Path(sys.argv[1])
+    else:
+        filepath = Path('mlmd.traj')
+    ats = read(filepath, index=':1:')
+    print(ats[0].get_chemical_formula())
 
 def wrap(*args):
     def modified_decimal_part(arr):
