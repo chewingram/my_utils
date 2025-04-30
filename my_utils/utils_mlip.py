@@ -9,7 +9,7 @@ from copy import deepcopy as cp
 
 import sys
 
-from .utils import data_reader, cap_first, repeat, warn, from_list_to_text, mae, rmse, R2 as R2_func, low_first, path
+from .utils import data_reader, cap_first, repeat, warn, from_list_to_text, mae, rmse, R2 as R2_func, low_first, path, flatten
 from .Graphics_matplotlib import Histogram
 
 
@@ -202,7 +202,7 @@ def make_mtp_file(sp_count, mind, maxd, rad_bas_sz, rad_bas_type='RBChebyshev', 
     maxd(float): max_dist; maximum distance between atoms
     rad_bas_sz(int): radial_basis_size; size of the radial basis
     rad_bas_type(str): radial_basis_type; set of radial basis (default=RBChebyshev)
-    lev(int): MTP level; one of [2, 4,  6, 8, 10, 12, 14,1 6, 18, 20, 22, 24, 26, 28]
+    lev(int): MTP level; one of [2, 4,  6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28]
     mtps_dir(str): directory where the untrained .mtp files are stored for all levels
     wdir(str): path to the working directory (where the new .mtp file will be saved)
     out_name(str): name of the .mtp file (must include extension) (only name, no path)
@@ -932,8 +932,8 @@ def train_pot_from_ase_tmp(mlip_bin,
     conv_ase_to_mlip2(atoms=train_set,
                       out_path=cfg_path.absolute(),
                       props=True)
-    
-    species_count = len(list(set(np.array([x.get_chemical_symbols() for  x in train_set]).flatten())))
+    [at.get_chemical_symbols() for at in train_set]
+    species_count = len(set(flatten([at.get_chemical_symbols() for at in train_set])))
     #print('inside train_pot_from_ase_tmp calling for train_pot_tmp')
     train_pot_tmp(mlip_bin=mlip_bin.absolute(),
                   untrained_pot_file_dir=untrained_pot_file_dir.absolute(),
