@@ -151,12 +151,12 @@ def warn(text):
     
 def flatten(l):
     """Recursively flattens a nested list."""
-    if not isinstance(l, list):
+    if not isinstance(l, (list, np.ndarray)):
         raise TypeError("The object given is not a list!")
     
     res = []
     for x in l:
-        if isinstance(x, list):
+        if isinstance(x, (list, np.ndarray)):
             res.extend(flatten(x))  # Always recursively flatten lists
         else:
             res.append(x)  # Append non-list elements directly
@@ -312,32 +312,32 @@ def R2(data1, data2):
     data1(list, numpy.array): true data
     data2(list, numpy.array): observed/predicted data
     '''
-    if isinstance(data1, numbers.Number):
-        data1 = np.array([data1])
-    if not isinstance(data1, list) and not isinstance(data1, type(np.array([42]))):
-        raise TypeError('data1 must be a list or a numpy array!')
-    elif not all([isinstance(x, numbers.Number) for x in data1]):
-        raise TypeError('All elements of data1 must be numbers!')
-    if isinstance(data1, list):
-        data1 = np.array(data1)
+    # if isinstance(data1, numbers.Number):
+    #     data1 = np.array([data1])
+    # if not isinstance(data1, list) and not isinstance(data1, type(np.array([42]))):
+    #     raise TypeError('data1 must be a list or a numpy array!')
+    # elif not all([isinstance(x, numbers.Number) for x in data1]):
+    #     raise TypeError('All elements of data1 must be numbers!')
+    # if isinstance(data1, list):
+    #     data1 = np.array(data1)
     
-    if isinstance(data2, numbers.Number):
-        data2 = np.array([data2])
-    if not isinstance(data2, list) and not isinstance(data2, type(np.array([42]))):
-        raise TypeError('data2 must be a list or a numpy array!')
-    elif not all([isinstance(x, numbers.Number) for x in data2]):
-        raise TypeError('All elements of data1 must be numbers!')
-    if isinstance(data2, list):
-        data2 = np.array(data2)        
+    # if isinstance(data2, numbers.Number):
+    #     data2 = np.array([data2])
+    # if not isinstance(data2, list) and not isinstance(data2, type(np.array([42]))):
+    #     raise TypeError('data2 must be a list or a numpy array!')
+    # elif not all([isinstance(x, numbers.Number) for x in data2]):
+    #     raise TypeError('All elements of data1 must be numbers!')
+    # if isinstance(data2, list):
+    #     data2 = np.array(data2)        
     
-    if len(data1) != len(data2):
-        raise ValueError('The two array must have the same size!')
+    # if len(data1) != len(data2):
+    #     raise ValueError('The two array must have the same size!')
     
-    mean = np.mean(data1)
-    rss = np.sum((data2 - data1)**2)# residual sum of squares
-    tss = np.sum((data2 - mean)**2) # total sum of squares
-    R2 = 1 - rss / tss
-    #print(f'data1: {data1}, data2: {data2}, rss: {rss}, tss: {tss}, R2: {R2}')
+    # mean = np.mean(data1)
+    # rss = np.sum((data2 - data1)**2)# residual sum of squares
+    # tss = np.sum((data2 - mean)**2) # total sum of squares
+    # R2 = 1 - rss / tss
+    # #print(f'data1: {data1}, data2: {data2}, rss: {rss}, tss: {tss}, R2: {R2}')
 
     slope, intercept, r_value, p_value, std_err = linregress(data1, data2)
     return r_value**2

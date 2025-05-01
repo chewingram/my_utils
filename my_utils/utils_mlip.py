@@ -9,7 +9,7 @@ from copy import deepcopy as cp
 
 import sys
 
-from .utils import data_reader, cap_first, repeat, warn, from_list_to_text, mae, rmse, R2 as R2_func, low_first, path, flatten
+from .utils import data_reader, cap_first, repeat, warn, from_list_to_text, mae, rmse, R2, low_first, path, flatten
 from .Graphics_matplotlib import Histogram
 
 
@@ -56,12 +56,7 @@ def plot_correlations(dtset_ind, ind, dir='', offsets=None, save=False, units=No
     #print(file_names[ind])
     #print(data[0])
     
-    
-    ss_res = sum([(float(x[0])-float(x[1]))**2 for x in data[2:]])
-    # avg_DFT = sum([float(x[0]) for x in data[2:]])
-    # avg_DFT = avg_DFT/(len(data)-2)
-    # ss_tot = sum([(float(x[0]) - avg_DFT)**2 for x in data[2:]])
-    # R2_v = 1 - ss_res/ss_tot
+
     R2_v = R2(x_data, y_data)
     txt = f"rmse: {rmse} {units[ind]}\nmae: {mae} {units[ind]}\nR$^2$: {str(round(R2_v, 4))}"
     x_data = np.array([float(pip[0]) for pip in data[2:]])
@@ -295,11 +290,11 @@ def extract_prop_from_ase(structures):
         
     Returns
     -------
-    energy: numpy.array of float
+    energy: list fof floats
             energy PER ATOM of each configuration (in eV/atom)
-    forces: numpy.array of float
-            forces with shape confs x natoms x 3 (in eV/Angst)
-    stress: numpy.array of float
+    forces: list of 2D np.arrays of floats
+            forces with shape nconfs x natoms x 3 (in eV/Angst)
+    stress: list of 2D np.arrays of floats
             stress tensor for each configuration (in eV/Angst^2)
         
     Notes
@@ -310,9 +305,9 @@ def extract_prop_from_ase(structures):
     '''
     if isinstance(structures, Atoms):
         structures = [structures]
-    energy = np.array([x.get_total_energy()/len(x) for x in structures], dtype='float')
-    forces = np.array([x.get_forces() for x in structures], dtype='float')
-    stress = np.array([x.get_stress() for x in structures], dtype='float')
+    energy = [x.get_total_energy()/len(x) for x in structures]
+    forces = [x.get_forces() for x in structures]
+    stress = [x.get_stress() for x in structures]
     
     return energy, forces, stress
     
@@ -329,11 +324,11 @@ def extract_prop_from_cfg(filepath):
         
     Returns
     -------
-    energy: numpy.array of float
+    energy: list of float
             energy PER ATOM of each configuration (in eV/atom)
-    forces: numpy.array of float
+    forces: list of 2D numpy.array of float
             forces with shape confs x natoms x 3 (in eV/Angst)
-    stress: numpy.array of float
+    stress: list of 2D numpy.array of float
             stress tensor for each configuration (in eV/Angst^2)
         
     Notes
@@ -356,7 +351,10 @@ def extract_prop_from_cfg(filepath):
             if "BEGIN CFG" in line:
                 nconf += 1
             if "Size" in line:
-                natom = int(lines[i+1])
+                natoms = int(lines[i+1])
+                curr_forces = np.zeros((natoms, 3))
+                curr_stress = np.zeros((6))
+
             if 'Supercell' in line:
                 cell = []
                 cell.append( [float(x) for x in lines[i+1].split()] )
@@ -367,11 +365,12 @@ def extract_prop_from_cfg(filepath):
                 next(iterator)
                 
             if "AtomData" in line:
-                for j in range(natom):
-                    forces.append(float(lines[i + 1 + j].split()[5]))
-                    forces.append(float(lines[i + 1 + j].split()[6]))
-                    forces.append(float(lines[i + 1 + j].split()[7]))
-                for k in range(natom):
+                for j in range(natoms):
+                    curr_forces[j,0] += float(lines[i + 1 + j].split()[5])
+                    curr_forces[j,1] += float(lines[i + 1 + j].split()[6])
+                    curr_forces[j,2] += float(lines[i + 1 + j].split()[7])
+
+                for k in range(natoms):
                     next(iterator)
                     
             if "Energy" in line:
@@ -380,17 +379,16 @@ def extract_prop_from_cfg(filepath):
             if "PlusStress" in line:
                 at = Atoms(numbers=[1], cell=cell)
                 V = at.get_volume()
-                stress.append(-float(lines[i+1].split()[0])/V) # xx
-                stress.append(-float(lines[i+1].split()[1])/V) # yy
-                stress.append(-float(lines[i+1].split()[2])/V) # zz
-                stress.append(-float(lines[i+1].split()[3])/V) # yz
-                stress.append(-float(lines[i+1].split()[4])/V) # xz
-                stress.append(-float(lines[i+1].split()[5])/V) # xy
-        nconfs = len(energy)
-        natoms = int(len(forces)/nconfs/3)
-        forces = np.array(forces).reshape(nconfs, natoms, 3)
-        stress = np.array(stress).reshape(nconfs, 6)
-        energy = np.array(energy)
+                curr_stress[0] += (-float(lines[i+1].split()[0])/V) # xx
+                curr_stress[1] += (-float(lines[i+1].split()[1])/V) # yy
+                curr_stress[2] += (-float(lines[i+1].split()[2])/V) # zz
+                curr_stress[3] += (-float(lines[i+1].split()[3])/V) # yz
+                curr_stress[4] += (-float(lines[i+1].split()[4])/V) # xz
+                curr_stress[5] += (-float(lines[i+1].split()[5])/V) # xy
+
+            forces.append(curr_forces)
+            stress.append(curr_stress)
+        
         return energy, forces, stress
     
     
@@ -493,18 +491,17 @@ def make_comparison(is_ase1=True,
     
     # Retrieve the data
     if is_ase1 == True:
-        ext1 = [x.flatten() for x in extract_prop_from_ase(structures1)]
+        ext1 = [flatten(x) for x in extract_prop_from_ase(structures1)]
     else:
-        ext1 = [x.flatten() for x in extract_prop_from_cfg(file1)]
-    nstructs = len(ext1[0])
-    natoms = int(len(ext1[1])/3/nstructs)
+        ext1 = [flatten(x) for x in extract_prop_from_cfg(file1)]
+
 
     ext1[0] = ext1[0] #* natoms
 
     if is_ase2 == True:
-        ext2 = [x.flatten() for x in extract_prop_from_ase(structures2)]
+        ext2 = [flatten(x) for x in extract_prop_from_ase(structures2)]
     else:
-        ext2 = [x.flatten() for x in extract_prop_from_cfg(file2)]
+        ext2 = [flatten(x) for x in extract_prop_from_cfg(file2)]
     ext2[0] = ext2[0] #* natoms
 
     assert len(ext1) == len(ext2), f"You gave a different number of "\
