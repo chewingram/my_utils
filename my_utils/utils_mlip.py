@@ -48,10 +48,14 @@ def plot_correlations(dtset_ind, ind, dir='', offsets=None, save=False, units=No
         offsets = [0, 0, 0]
     #ind = 1
 
-    data = data_reader(file_names[ind].absolute(), separator="", skip_lines=0, frmt="str")
+#    data = data_reader(file_names[ind].absolute(), separator="", skip_lines=0, frmt="str")
+    with open(file_names[ind].absolute(), 'r') as fl:
+        lines = fl.readlines()
+    rmse = float(lines[0].split()[2])
+    mae = float(lines[0].split()[5])
+    x_data = [float(x.split()[0]) for x in lines[2:]]
+    y_data = [float(x.split()[1]) for x in lines[2:]]
 
-    rmse = data[0][2] 
-    mae = data[0][5]
     #print(f"rmse {rmse}, mae {mae}")
     #print(file_names[ind])
     #print(data[0])
@@ -59,8 +63,6 @@ def plot_correlations(dtset_ind, ind, dir='', offsets=None, save=False, units=No
 
     R2_v = R2(x_data, y_data)
     txt = f"rmse: {rmse} {units[ind]}\nmae: {mae} {units[ind]}\nR$^2$: {str(round(R2_v, 4))}"
-    x_data = np.array([float(pip[0]) for pip in data[2:]])
-    y_data = np.array([float(pip[1]) for pip in data[2:]])
     n = 2.3
     fig1 = plt.figure(figsize=(n, n))
     ax = fig1.add_axes((0, 0, 1, 1))
@@ -348,7 +350,7 @@ def extract_prop_from_cfg(filepath):
         stress = []
         
         for i, line in iterator:
-            if "BEGIN CFG" in line:
+            if "BEGIN_CFG" in line:
                 nconf += 1
             if "Size" in line:
                 natoms = int(lines[i+1])
@@ -369,12 +371,13 @@ def extract_prop_from_cfg(filepath):
                     curr_forces[j,0] += float(lines[i + 1 + j].split()[5])
                     curr_forces[j,1] += float(lines[i + 1 + j].split()[6])
                     curr_forces[j,2] += float(lines[i + 1 + j].split()[7])
+                forces.append(curr_forces)
 
                 for k in range(natoms):
                     next(iterator)
                     
             if "Energy" in line:
-                energy.append(float(lines[i+1])/natom) # ENERGY PER ATOM!!!!
+                energy.append(float(lines[i+1])/natoms) # ENERGY PER ATOM!!!!
             
             if "PlusStress" in line:
                 at = Atoms(numbers=[1], cell=cell)
@@ -385,9 +388,7 @@ def extract_prop_from_cfg(filepath):
                 curr_stress[3] += (-float(lines[i+1].split()[3])/V) # yz
                 curr_stress[4] += (-float(lines[i+1].split()[4])/V) # xz
                 curr_stress[5] += (-float(lines[i+1].split()[5])/V) # xy
-
-            forces.append(curr_forces)
-            stress.append(curr_stress)
+                stress.append(curr_stress)
         
         return energy, forces, stress
     
