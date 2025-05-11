@@ -14,7 +14,7 @@ from copy import deepcopy as cp
 
 binpath = shutil.which('extract_forceconstants')
 if binpath is not None:
-    g_tdep_bin_directory = Path(binpath).absolute()
+    g_tdep_bin_directory = Path(binpath).parent.absolute()
 else:
     g_tdep_bin_directory = Path('./').absolute()
 
@@ -223,12 +223,14 @@ def make_meta(confs, dir, timestep=1, temp=None):
     with open(dir.joinpath('infile.meta').absolute(), 'w') as fl:
         fl.write(text)
 
-def make_canonical_configurations(nconf, temp, quantum, dir, outfile_name, max_freq=False, pref_bin='', tdep_bin_directory=None):
+def make_canonical_configurations(ucell, scell, nconf, temp, quantum, dir, outfile_name, max_freq=False, ifcfile_path=None, pref_bin='', tdep_bin_directory=None):
     '''
     Function to launch tdep canonical-configurations specifying only the number of confs, the temperature and
     the quantum flag. After this, all (non bugged) files are merged in a single ASE traj (outfile_name).
     If canonical-sampling produces some bugged confs, it will be regenerated and saved in the output file.
     Args:
+    ucell(ase.Atoms): unit cell
+    scell(ase.Atoms): supercell
     nconf(int): number of configurations to generate
     temp(float): temperature
     quantum(bool): True: quantum phonon distribution; False: classical phonon distribution
@@ -255,10 +257,16 @@ def make_canonical_configurations(nconf, temp, quantum, dir, outfile_name, max_f
     
     tok = 0
     
+    write(dir.joinpath('infile.ucposcar'), ucell, format='vasp')
+    write(dir.joinpath('infile.ssposcar'), scell, format='vasp')
+
     if max_freq != False:
         max_freq = f'--maximum_frequency {max_freq}'
     else:
         max_freq = ''
+        if ifcfile_path is None:
+            raise TypeError('Since max_freq is False, you must provide ifcfile_path!')
+        ln_s_f(Path(ifcfile_path), dir.joinpath('infile.forceconstant'))
             
     while tok < 1:
         if quantum == True:
@@ -269,6 +277,7 @@ def make_canonical_configurations(nconf, temp, quantum, dir, outfile_name, max_f
         logpath = dir.joinpath('log_cs')
         errpath = dir.joinpath('err_cs')
         with open(logpath.absolute(), 'w') as log, open(errpath.absolute(), 'w') as err:
+            print(cmd)
             run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)
         # merge the confs available
         n_done = merge_confs(n_conf=nconf, dir=dir.absolute(), filename=outfile_name)
@@ -1159,4 +1168,305 @@ def convergence_tdep_mdlen(
             run(f'sbatch {Path(job_template).name}', cwd=inst_dir, shell=True)
 
 
+def extract_ifcs(from_infiles = False,
+                 infiles_dir = None,
+                 unitcell = None,
+                 supercell = None,
+                 sampling = None,
+                 timestep = 1,
+                 dir = './',
+                 first_order = False,
+                 displ_threshold_firstorder = 0.0001,
+                 max_iterations_first_order = 20,
+                 rc2 = None, 
+                 rc3 = None, 
+                 polar = False,
+                 loto_filepath = None, 
+                 stride = 1, 
+                 temperature = None,
+                 bin_prefix = '',
+                 tdep_bin_directory = None):
     
+    
+    # FUNCTIONS #
+    def check_convergence_positions(dir, displ_threshold_firstorder):
+        old_positions = read(dir.joinpath('infile.ucposcar'), format='vasp').get_positions()
+        new_positions = read(dir.joinpath('outfile.new_ucposcar'), format='vasp').get_positions()
+        err = new_positions - old_positions
+
+        if (err >= displ_threshold_firstorder).any():
+            return False, err
+        else:
+            return True, err
+        
+    def move(src, dest):
+        at = read(src, format='vasp')
+        write(dest, at, format='vasp')
+        src.unlink()
+    #############
+
+
+    dir = Path(dir)
+
+    if from_infiles == True:
+        if infiles_dir is None:
+            raise TypeError('Since from_infiles is True, you must provide infiles_dir!')
+        else:
+            src_infiles_dir = Path(infiles_dir)
+    else:
+        if any([unitcell is None, supercell is None, sampling is None]):
+            raise TypeError('Since from_infiles is False, you must provide the unitcell, the supercell and the sampling trajectory!')
+        
+    if first_order == True:
+        first_order = '--firstorder'
+    else:
+        first_order = ''
+
+    if rc2 is None:
+        raise TypeError('rc2 is mandatory!')
+    else:
+        rc2 = f'-rc2 {rc2}'
+    
+    if rc3 is None:
+        rc3 = ''
+    else:
+        rc3 = f'-rc3 {rc3}'
+    
+    if polar == True:
+        if loto_filepath is None:
+            raise TypeError('Since polar is True, you must provide loto_filepath!')
+        else:
+            polar = '--polar'
+            loto_filepath = Path(loto_filepath)
+    else:
+        polar = ''
+
+    if tdep_bin_directory is None or tdep_bin_directory == '':
+        tdep_bin_directory = g_tdep_bin_directory
+    else:
+        tdep_bin_directory = Path(tdep_bin_directory) # if it's already a Path(), this won't change anything
+    
+    stride = f'--stride {stride}'
+
+    temperature = f'--temperature {temperature}'
+
+
+    #infiles_dir = Path(dir.joinpath('infiles'))
+    #infiles_dir.mkdir(parents=True, exist_ok=True)
+    if from_infiles == True:
+        ln_s_f(src_infiles_dir.joinpath('infile.ucposcar'), dir)
+        ln_s_f(src_infiles_dir.joinpath('infile.ssposcar'), dir)
+        ln_s_f(src_infiles_dir.joinpath('infile.meta'), dir)
+        ln_s_f(src_infiles_dir.joinpath('infile.stat'), dir)
+        ln_s_f(src_infiles_dir.joinpath('infile.positions'), dir)
+        ln_s_f(src_infiles_dir.joinpath('infile.forces'), dir)
+        unitcell = read(src_infiles_dir.joinpath('infile.ucposcar'), format='vasp')
+        supercell = read(src_infiles_dir.joinpath('infile.ssposcar'), format='vasp')
+    else:       
+        write(dir.joinpath('infile.ucposcar'), unitcell, format='vasp')
+        write(dir.joinpath('infile.ssposcar'), supercell, format='vasp')
+        make_stat(sampling, dir)
+        make_meta(sampling, dir, timestep=timestep, temp=100)
+        make_forces(sampling, dir)
+        make_positions(sampling, dir)
+
+    if polar == '--polar':
+        ln_s_f(loto_filepath, dir.joinpath('infile.lotosplitting'))
+    
+    cmd = f'{bin_prefix} {tdep_bin_directory.joinpath("extract_forceconstants")} {first_order} {rc2} {rc3} {temperature} {polar} {stride}'
+    print(cmd)
+    if first_order == '':
+        logpath = dir.joinpath('log_ifc')
+        errpath = dir.joinpath('err_ifc')
+        with open(logpath.absolute(), 'w') as log, open(errpath.absolute(), 'w') as err:
+            run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)
+    else:
+        ucells = [unitcell]
+        print('First order is True! Let\'s start the iterative optimization of the unitcell!')
+        mat = supercell.get_cell() @ np.linalg.inv(unitcell.get_cell())
+        # first iteration
+        print(f'Iteration 1:')
+        logpath = dir.joinpath('log_ifc')
+        errpath = dir.joinpath('err_ifc')
+        with open(logpath.absolute(), 'w') as log, open(errpath.absolute(), 'w') as err:
+            run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)
+        ucells.append(read(dir.joinpath('outfile.new_ucposcar'), format='vasp'))
+        dir.joinpath('infile.ucposcar').unlink()
+        move(dir.joinpath('outfile.new_ucposcar'), dir.joinpath('infile.ucposcar'))
+        new_unitcell = ucells[-1]
+        new_supercell = make_supercell(new_unitcell, mat)
+        dir.joinpath('infile.ssposcar').unlink()
+        write(dir.joinpath('infile.ssposcar'), new_supercell, format='vasp')
+        dir.joinpath('outfile.new_ssposcar').unlink()
+
+        
+        # next iterations
+        for i in range(max_iterations_first_order-1):
+            print(f'Iteration {i+2}:')
+            with open(logpath.absolute(), 'w') as log, open(errpath.absolute(), 'w') as err:
+                run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)
+            ucells.append(read(dir.joinpath('outfile.new_ucposcar'), format='vasp'))
+            converged, err = check_convergence_positions(dir, displ_threshold_firstorder)
+            print(f'\tMaximum difference in position: {err.max()} Angstrom')
+            dir.joinpath('infile.ucposcar').unlink()
+            move(dir.joinpath('outfile.new_ucposcar'), dir.joinpath('infile.ucposcar'))
+            new_unitcell = ucells[-1]
+            new_supercell = make_supercell(new_unitcell, mat)
+            dir.joinpath('infile.ssposcar').unlink()
+            write(dir.joinpath('infile.ssposcar'), new_supercell, format='vasp')
+            dir.joinpath('outfile.new_ssposcar').unlink()
+            
+            if converged:
+                print(f'Convergence reached at iteration {i+2} ({err.max()} < {displ_threshold_firstorder})!')
+                print('infile.ucposcar and infile.ssposcar now contain the optimized cells.')
+                break 
+
+            if i == max_iterations_first_order - 1:
+                print('ATTENTION! The maximum number of iterations was reached without convergence!')
+        
+        #write('ucells.traj', ucells)
+            
+            
+def conv_rc2_extract_ifcs(unitcell = None,
+                          supercell = None,
+                          sampling = None,
+                          timestep = 1,
+                          dir = './',
+                          first_order = False,
+                          displ_threshold_firstorder = 0.0001,
+                          max_iterations_first_order = 20,
+                          rc2s = None, 
+                          rc3 = None, 
+                          polar = False,
+                          loto_filepath = None, 
+                          stride = 1, 
+                          temperature = None,
+                          bin_prefix = '',
+                          tdep_bin_directory = None,
+                          max_err_threshold = 0.001): # eV/A^2
+    
+    dir = Path(dir)
+
+    infiles_dir = dir.joinpath('infiles')
+    infiles_dir.mkdir(parents=True, exist_ok=True)
+    write(infiles_dir.joinpath('infile.ucposcar'), unitcell, format='vasp')
+    write(infiles_dir.joinpath('infile.ssposcar'), supercell, format='vasp')
+    make_stat(sampling, infiles_dir)
+    make_meta(sampling, infiles_dir, timestep=timestep, temp=100)
+    make_forces(sampling, infiles_dir)
+    make_positions(sampling, infiles_dir)
+
+    print('Launching convergence of IFCs with respect to the 2nd order cutoff')
+    ifcs = []
+    for rc2 in rc2s:
+        print(f'+++ rc2 = {rc2} +++')
+        rc2_dir = dir.joinpath(f'rc2_{rc2}')
+        rc2_dir.mkdir(parents=True, exist_ok=True)
+        extract_ifcs(from_infiles = True,
+                infiles_dir = infiles_dir,
+                unitcell = None,
+                supercell = None,
+                sampling = None,
+                timestep = timestep,
+                dir = rc2_dir,
+                first_order = first_order,
+                displ_threshold_firstorder = displ_threshold_firstorder,
+                max_iterations_first_order = max_iterations_first_order,
+                rc2 = rc2, 
+                rc3 = rc3, 
+                polar = polar,
+                loto_filepath = loto_filepath, 
+                stride = stride, 
+                temperature = temperature,
+                bin_prefix = bin_prefix,
+                tdep_bin_directory = tdep_bin_directory)
+        print(f'--------------')
+        ifcs.append(parse_outfile_forceconstants(rc2_dir.joinpath('outfile.forceconstant')))
+    ifcs = np.array(ifcs)
+    diffs = np.array([abs(ifcs[i] - ifcs[i-1]) for i in range(1, ifcs.shape[0])])
+    max_diffs = np.max(diffs,axis=(1,2,3,4))
+    avg_diffs = np.mean(diffs, axis=(1,2,3,4))
+
+
+    Fig = plt.figure(figsize=(15,4))
+    Fig.add_subplot(1,2,1)
+    plt.plot(rc2s[1:], max_diffs, '.')
+    plt.title('IFC convergence: max abs. error')
+    plt.ylabel('Error on the IFCs (eV/$\mathrm{\AA}^2$)')
+    plt.xlabel('rc2 ($\mathrm{\AA}$)')
+    
+    Fig.add_subplot(1,2,2)
+    plt.plot(rc2s[1:], avg_diffs, '.')
+    plt.title('IFC convergence: avg abs. error')
+    plt.ylabel('Error on the IFCs (eV/$\mathrm{\AA}^2$)')
+    plt.xlabel('rc2 ($\mathrm{\AA}$)')
+    
+    figpath = dir.joinpath(f'Convergence.png')
+    plt.savefig(fname=figpath, bbox_inches='tight', dpi=600, format='png')
+
+    for i, max_diff in enumerate(max_diffs):
+        print(f'now comparing the max_diff {max_diff} with {max_err_threshold}')
+        if max_diff < max_err_threshold:
+            first_converged = dir.joinpath(f'rc2_{rc2s[i]}/outfile.forceconstant')
+            print('converged!')
+    return first_converged, max_diffs, avg_diffs
+
+    
+
+
+def parse_outfile_forceconstants(filepath, unitcell, supercell):
+    
+    def find_index_in_unitcell(red_position, unitcell):
+        scaled_positions = unitcell.get_scaled_positions()
+        return np.argmin(np.linalg.norm(scaled_positions - red_position, axis=1))
+
+    mat = supercell.get_cell() @ np.linalg.inv(unitcell.get_cell())
+    filepath = Path(filepath)
+    
+    with open(filepath, 'r') as fl:
+        lines = fl.readlines()
+    lines = [x.split() for x in lines]
+    nats_s = len(supercell)
+    nats_u = len(unitcell)
+
+    cell = unitcell.get_cell()
+    positions = supercell.get_positions() # nats, 3
+    positions_red = (np.linalg.inv(cell.T) @ positions.T).T
+    atoms_tuples = []
+    for i, atom in enumerate(supercell):
+        frac_part = positions_red[i] % 1 # works for both positive and negative reduced coords!!! e.g. -1.3 % 1 = 0.7, not -0.3
+        ind = find_index_in_unitcell(frac_part, unitcell)
+        repetition_indices = [np.floor(positions_red[i][0]).astype(int), np.floor(positions_red[i][1]).astype(int),np.floor(positions_red[i][2]).astype(int)] # again, works for positive and negative numbers, np.floor(-1.3) = -2, not -1!!
+        atoms_tuples.append((ind, *repetition_indices))
+    # now atoms_tuples is a list of tuples (ind, R1, R2, R3), where ind the index of the atom in the unitcell and R1/2/3 are the component of the position of the repetition in reduced coordinates
+
+    ifc = np.zeros((nats_u, nats_s, 3, 3))
+    k = 2
+    for i in range(nats_u):
+        nns = int(lines[k][0]) # number of neighbours
+        for n in range(nns):
+            ci = k+1+5*n
+            neigh_unit_ind = int(lines[ci][0])-1 # index of the neighbour in the unitcell
+            vec_u = np.array([float(lines[ci+1][0]), float(lines[ci+1][1]), float(lines[ci+1][2])])
+            
+            # we need to change the basis of vec from the unitcell vectors to the supercell vectors
+            # x^u = L x^s where L is P.T, where P is the mat_mult used to create the supercell from the unitcell
+            # in principle we can compute x^s = L^-1 @ x^u, but np.solve is faster
+            vec_s = np.linalg.solve(mat.T, vec_u)
+            vec_s[np.abs(vec_s) < 1E-10] = 0
+            vec_wrapped_s = vec_s % 1
+            vec_wrapped_u = mat @ vec_wrapped_s
+            vec_wrapped_u[np.abs(vec_wrapped_u) < 1E-10] = 0
+
+
+            current_tuple = (neigh_unit_ind, vec_wrapped_u[0], vec_wrapped_u[1], vec_wrapped_u[2])
+            j = atoms_tuples.index(current_tuple) # find the matching tuple, j is the index of the neighbour in the supercell
+            tens = []
+            tens.append([float(lines[ci+2][0]), float(lines[ci+2][1]), float(lines[ci+2][2])])
+            tens.append([float(lines[ci+3][0]), float(lines[ci+3][1]), float(lines[ci+3][2])])
+            tens.append([float(lines[ci+4][0]), float(lines[ci+4][1]), float(lines[ci+4][2])])
+            tens = np.array(tens, dtype='float')
+            ifc[i,j] += tens
+        k += 1+5*nns
+
+    return ifc
