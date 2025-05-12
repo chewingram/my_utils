@@ -277,7 +277,6 @@ def make_canonical_configurations(ucell, scell, nconf, temp, quantum, dir, outfi
         logpath = dir.joinpath('log_cs')
         errpath = dir.joinpath('err_cs')
         with open(logpath.absolute(), 'w') as log, open(errpath.absolute(), 'w') as err:
-            print(cmd)
             run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)
         # merge the confs available
         n_done = merge_confs(n_conf=nconf, dir=dir.absolute(), filename=outfile_name)
@@ -1274,7 +1273,6 @@ def extract_ifcs(from_infiles = False,
         ln_s_f(loto_filepath, dir.joinpath('infile.lotosplitting'))
     
     cmd = f'{bin_prefix} {tdep_bin_directory.joinpath("extract_forceconstants")} {first_order} {rc2} {rc3} {temperature} {polar} {stride}'
-    print(cmd)
     if first_order == '':
         logpath = dir.joinpath('log_ifc')
         errpath = dir.joinpath('err_ifc')
@@ -1364,9 +1362,9 @@ def conv_rc2_extract_ifcs(unitcell = None,
         rc2_dir.mkdir(parents=True, exist_ok=True)
         extract_ifcs(from_infiles = True,
                 infiles_dir = infiles_dir,
-                unitcell = None,
-                supercell = None,
-                sampling = None,
+                unitcell = None, # no need
+                supercell = None, # no need
+                sampling = None, # no need
                 timestep = timestep,
                 dir = rc2_dir,
                 first_order = first_order,
@@ -1381,7 +1379,7 @@ def conv_rc2_extract_ifcs(unitcell = None,
                 bin_prefix = bin_prefix,
                 tdep_bin_directory = tdep_bin_directory)
         print(f'--------------')
-        ifcs.append(parse_outfile_forceconstants(rc2_dir.joinpath('outfile.forceconstant')))
+        ifcs.append(parse_outfile_forceconstants(rc2_dir.joinpath('outfile.forceconstant'), unitcell, supercell))
     ifcs = np.array(ifcs)
     diffs = np.array([abs(ifcs[i] - ifcs[i-1]) for i in range(1, ifcs.shape[0])])
     max_diffs = np.max(diffs,axis=(1,2,3,4))
@@ -1405,10 +1403,13 @@ def conv_rc2_extract_ifcs(unitcell = None,
     plt.savefig(fname=figpath, bbox_inches='tight', dpi=600, format='png')
 
     for i, max_diff in enumerate(max_diffs):
-        print(f'now comparing the max_diff {max_diff} with {max_err_threshold}')
+        #print(f'now comparing the max_diff {max_diff} with {max_err_threshold}')
         if max_diff < max_err_threshold:
             first_converged = dir.joinpath(f'rc2_{rc2s[i]}/outfile.forceconstant')
-            print('converged!')
+            #print('converged!')
+        else:
+            #print('not converged...')
+            pass
     return first_converged, max_diffs, avg_diffs
 
     
@@ -1448,7 +1449,7 @@ def parse_outfile_forceconstants(filepath, unitcell, supercell):
             ci = k+1+5*n
             neigh_unit_ind = int(lines[ci][0])-1 # index of the neighbour in the unitcell
             vec_u = np.array([float(lines[ci+1][0]), float(lines[ci+1][1]), float(lines[ci+1][2])])
-            
+            vec_u = np.round(vec_u).astype(int)
             # we need to change the basis of vec from the unitcell vectors to the supercell vectors
             # x^u = L x^s where L is P.T, where P is the mat_mult used to create the supercell from the unitcell
             # in principle we can compute x^s = L^-1 @ x^u, but np.solve is faster
@@ -1457,7 +1458,7 @@ def parse_outfile_forceconstants(filepath, unitcell, supercell):
             vec_wrapped_s = vec_s % 1
             vec_wrapped_u = mat @ vec_wrapped_s
             vec_wrapped_u[np.abs(vec_wrapped_u) < 1E-10] = 0
-
+            vec_wrapped_u = np.round(vec_wrapped_u).astype(int)
 
             current_tuple = (neigh_unit_ind, vec_wrapped_u[0], vec_wrapped_u[1], vec_wrapped_u[2])
             j = atoms_tuples.index(current_tuple) # find the matching tuple, j is the index of the neighbour in the supercell
