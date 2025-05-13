@@ -1410,6 +1410,9 @@ def conv_rc2_extract_ifcs(unitcell = None,
         else:
             #print('not converged...')
             pass
+    if first_converged = None:
+        print('!!!IFCs did not converge with respect to the second order cutoff. You need higher values of rc2!')
+        first_converged = dir.joinpath(f'rc2_{rc2s[len(max_diffs)-1]}/outfile.forceconstant')
     return first_converged, max_diffs, avg_diffs
 
     
