@@ -15,6 +15,7 @@ from .utils import ln_s_f, min_distance_to_surface
 from subprocess import run
 import shutil
 from ase.calculators.singlepoint import SinglePointCalculator
+import h5py
 
 
 
@@ -738,7 +739,6 @@ def launch_stdep(
         
         min_dist = min([min_distance_to_surface(x.get_cell()) for x in latest_confs_computed]) ##
 
-        rc2s = [4,5,6,7,8,9]
 
         
         last_ifc_path, max_diffs, avg_diffs = tdp.conv_rc2_extract_ifcs(unitcell = ucell,
@@ -758,7 +758,7 @@ def launch_stdep(
                                                                         tdep_bin_directory = tdep_bin_directory,
                                                                         max_err_threshold = ifc_max_err_threshold)
         
-        ln_s_f(last_ifc_path, iter_dir.joinpath('converged_outfile.forceconstant'))
+        shutil.copy(last_ifc_path, iter_dir.joinpath('converged_outfile.forceconstant'))
         print(f'============================')
 
     # check if IFC convergence through the iterations
@@ -784,5 +784,38 @@ def launch_stdep(
 
     
 
+def conv_size(folders, labels, bin_pref='', unit_label='THz'):
+    
+    freqs = []
+    doss = []
+    folders = [Path(folder) for folder in folders]
+    iters_dirs = [folder.joinpath('iterations') for folder in folders]
+    n_iters = [max([int(str(x).split('_')[-1]) for x in iters_dir.glob('iter_*')]) for iters_dir in iters_dirs]
+    max_iter = min(n_iters) # the maximum common number of iterations (the minimum among n_iters)
+    
+    print(n_iters)
+    for i, iter_dir in enumerate(iters_dirs):
+        max_iter_dir = iter_dir.joinpath(f'iter_{max_iter}')
+        ucell = read(max_iter_dir.joinpath('infile.ucposcar'), format='vasp')
+        scell = read(max_iter_dir.joinpath('infile.ssposcar'), format='vasp')
+        ifc_file = max_iter_dir.joinpath('converged_outfile.forceconstant').absolute()
+        
+        ph_dir = max_iter_dir.joinpath('phonons')
+        ph_dir.mkdir(parents=True, exist_ok=True)
+
+        #tdp.run_phonons(dir=ph_dir, ucell=ucell, scell=scell, ifc_file=ifc_file, qgrid=32, dos=True, bin_pref=bin_pref)
+        print(ph_dir.joinpath('outfile.phonon_dos.hdf5'))
+        fl = h5py.File(ph_dir.joinpath('outfile.phonon_dos.hdf5'))
+        freqs.append(np.array(fl['frequencies']))
+        doss.append(np.array(fl['dos']))
+
+    print(len(freqs[i]))
+    for i, label in enumerate(labels):
+        plt.plot(freqs[i], doss[i], label=label, lw=0.5)
+    plt.xlabel(f'Frequency ({unit_label})')
+    plt.ylabel(f'Phonon DOS (states/{unit_label})')
+    plt.legend()
+    plt.savefig(fname='Convergence_wrt_size.png', bbox_inches='tight', dpi=600)
+    
 
 

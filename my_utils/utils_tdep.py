@@ -91,9 +91,13 @@ def merge_confs(n_conf, dir, pref='aims_conf', filename='canonical_structures.tr
         fpath = dir.joinpath(fname)
         try:
             conf = read(fpath.absolute(), format='aims')
-            confs.append(cp(conf))
             
-        except: # e.g. the file is bugged/corrupted
+        except: # e.g. the file is bugged/corrupted AND can't be opened
+            pass
+
+        if len(conf) != 0:
+            confs.append(cp(conf))
+        else: # e.g. the file is openable but empty
             pass
 
         fpath.unlink(missing_ok=False) # now we can delete the original file
@@ -259,7 +263,7 @@ def make_canonical_configurations(ucell, scell, nconf, temp, quantum, dir, outfi
     
     write(dir.joinpath('infile.ucposcar'), ucell, format='vasp')
     write(dir.joinpath('infile.ssposcar'), scell, format='vasp')
-
+    pref_bin = '' # we force this because the canonical_configurations binary is kinda bugged and doesn't work in parallel
     if max_freq != False:
         max_freq = f'--maximum_frequency {max_freq}'
     else:
@@ -1474,3 +1478,25 @@ def parse_outfile_forceconstants(filepath, unitcell, supercell):
         k += 1+5*nns
 
     return ifc
+
+
+def run_phonons(dir, ucell, scell, ifc_file, qgrid=32, tdep_bin_directory=None, bin_pref='', dos=False, units='thz'):
+    write(dir.joinpath('infile.ucposcar'), ucell, format='vasp')
+    write(dir.joinpath('infile.ssposcar'), scell, format='vasp')
+    shutil.copy(ifc_file, dir.joinpath('infile.forceconstant'))
+
+    if tdep_bin_directory is None or tdep_bin_directory == '':
+        tdep_bin_directory = g_tdep_bin_directory
+    else:
+        tdep_bin_directory = Path(tdep_bin_directory) # if it's already a Path(), this won't change anything
+
+    if dos == False:
+        dos = ''
+    else:
+        dos = '--dos'
+    cmd = f'{bin_pref} {tdep_bin_directory.joinpath("phonon_dispersion_relations")} -qg {qgrid} {qgrid} {qgrid} {dos} --unit {units}'
+    logpath = dir.joinpath('log_ph')
+    errpath = dir.joinpath('err_ph')
+    print(cmd)
+    with open(logpath.absolute(), 'w') as log, open(errpath.absolute(), 'w') as err:
+            run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)

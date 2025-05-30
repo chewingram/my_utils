@@ -858,6 +858,95 @@ def rdf_ase_elems(atoms,
                   movie_dpi=200,
                   movie_titles=None):
 
+    """
+    Computes and analyzes the radial distribution function (RDF) for one or multiple ASE `Atoms` objects.
+
+    This function allows to compute RDFs for selected atomic species acting as centers and coordinators, 
+    with options to handle multiple structures, generate plots, and create animated GIFs over trajectories.
+
+    Parameters
+    ----------
+    atoms : ase.atoms.Atoms or list of ase.atoms.Atoms
+        One or multiple structures to compute the RDF.
+
+    center_elements : str, int, list, or np.ndarray, optional
+        The atomic species to use as RDF centers.
+        - 'all' (default): all elements present in all structures.
+        - String (e.g., 'Si') or atomic number (e.g., 14).
+        - List/array of strings or atomic numbers.
+
+    coord_elements : dict, or 'all', optional
+        Dictionary where keys are center atomic numbers (or chemical symbols) and values are lists of coordinator atomic species.
+        - 'all' (default): all species will be considered as coordinators for each center.
+        - Example: `{ 'Si': ['O'], 'O': ['Si', 'O'] }`.
+
+    nbins : int, optional
+        Number of bins for the RDF histogram. Default is 100.
+
+    cutoff : float, str, or list of float, optional
+        Cutoff distance (in Å).
+        - 'auto-equal' (default): automatically computed as the smallest among all structures.
+        - 'auto': computed individually for each structure.
+        - Float or list of floats, one for each structure.
+
+    V : float, optional
+        Volume to normalize RDF. If `None`, the cell volume is used.
+
+    clip_autocorr : bool, optional
+        If `True`, the self-correlation at r=0 is set to 0.
+
+    plot : bool, optional
+        If `True`, generates and displays RDF plots.
+
+    fig_dir : str or pathlib.Path, optional
+        Directory to save RDF plots and movies. Created if it doesn't exist.
+
+    save_plots : bool, optional
+        If `True`, saves RDF plots as PNG files.
+
+    fig_dpi : int, optional
+        DPI resolution for the saved figures.
+
+    make_movies : bool, optional
+        If `True`, creates animated GIFs of RDF evolution over trajectory frames.
+
+    movie_fps : int, optional
+        Frames per second for the generated GIFs.
+
+    movie_dpi : int, optional
+        DPI resolution for the generated GIFs.
+
+    movie_titles : list of str, optional
+        Titles to show in the RDF movies (one title per frame).
+        If `None`, uses generic numbers.
+
+    Returns
+    -------
+    coll_RDFs : list
+        List of partial RDFs for each center-coordinator pair, for each structure.
+
+    coll_RDFs_tot : list
+        List of total RDFs for each center element (all coordinators combined), for each structure.
+
+    coll_bincs : list of np.ndarray
+        List of RDF bin centers for each structure.
+
+    coll_cutoff : np.ndarray
+        Array of cutoff distances used for each structure.
+
+    coll_rdf_at : list of np.ndarray
+        Raw RDF arrays (per-center basis) for each structure.
+
+    Notes
+    -----
+    - The function allows for flexible combinations of center and coordinator species.
+    - For multiple structures (trajectories), GIFs showing the RDF evolution over time can be generated.
+    - Uses the auxiliary `rdf` function to compute the actual RDF per center.
+    - Uses the minimum image convention internally.
+    - Supports automatic formatting of species labels from strings or atomic numbers.
+
+    """
+
     # AUXILIARY FUNCTIONS
     def wipe(x):
         del x
@@ -1229,3 +1318,7 @@ def rdf_ase_elems(atoms,
     
     
     
+
+
+def ang_rdf(struct):
+    elems = [struct.get_atomic_symbols()]
