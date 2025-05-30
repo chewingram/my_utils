@@ -541,6 +541,8 @@ def launch_stdep(
     max_iterations_first_order: int = None,
     rc2s: List[float] = None,
     rc3: float = None,
+    polar: bool = False,
+    loto_infile: str = None,
     ifc_max_err_threshold: float = None,
     niters: int = 10,
     nconfs: List[int] = None,
@@ -611,6 +613,12 @@ def launch_stdep(
     rc3 : float, optional
         Third-order interaction cutoff (in Å). May be unused depending on setup.
 
+    polar : bool, optional
+        LO-TO splitting. If True, loto_infile must be given
+    
+    loto_infile : str or pathlib.Path, optional
+        Filepath to the loto splitting infile
+    
     ifc_max_err_threshold : float, optional
         Maximum allowed error threshold (in eV/Å²) to consider the IFCs converged at each iteration.
         Default if 0.0001.
@@ -671,7 +679,12 @@ def launch_stdep(
         max_freq = False
     if tdep_bin_directory is not None:
         tdep_bin_directory = Path(tdep_bin_directory)
-        
+    
+    if polar == True:
+        if loto_infile is None:
+            raise TypeError('Since polar is True, you must provide loto_infile!')
+        else:
+            loto_infile = Path(loto_infile) 
 
     root_dir = Path(root_dir)
 
@@ -751,7 +764,8 @@ def launch_stdep(
                                                                         max_iterations_first_order = max_iterations_first_order,
                                                                         rc2s = rc2s, 
                                                                         rc3 = rc3, 
-                                                                        polar = False,
+                                                                        polar = polar,
+                                                                        loto_filepath = loto_filepath,
                                                                         stride = 1, 
                                                                         temperature = T,
                                                                         bin_prefix = pref_bin,
