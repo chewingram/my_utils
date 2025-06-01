@@ -544,7 +544,6 @@ def launch_stdep(
     polar: bool = False,
     loto_infile: str = None,
     ifc_max_err_threshold: float = None,
-    niters: int = 10,
     nconfs: List[int] = None,
     pref_bin: str = '',
     mlip_pot_path: str = None,
@@ -623,12 +622,9 @@ def launch_stdep(
         Maximum allowed error threshold (in eV/Å²) to consider the IFCs converged at each iteration.
         Default if 0.0001.
 
-    niters : int, optional
-        Total number of sTDEP iterations. Default is 10.
-
     nconfs : list of int, optional
         List of the number of sampling configurations to be generated at each sTDEP iteration.
-        Must have length equal to `niters`. Each entry defines the number of configurations
+        This will determine also the number of iterations. Each entry defines the number of configurations
         for that iteration.
 
     pref_bin : str, optional
@@ -685,6 +681,8 @@ def launch_stdep(
             raise TypeError('Since polar is True, you must provide loto_infile!')
         else:
             loto_infile = Path(loto_infile) 
+
+    niters = len(nconfs)
 
     root_dir = Path(root_dir)
 
@@ -765,7 +763,7 @@ def launch_stdep(
                                                                         rc2s = rc2s, 
                                                                         rc3 = rc3, 
                                                                         polar = polar,
-                                                                        loto_filepath = loto_filepath,
+                                                                        loto_filepath = loto_infile,
                                                                         stride = 1, 
                                                                         temperature = T,
                                                                         bin_prefix = pref_bin,

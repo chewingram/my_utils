@@ -82,7 +82,85 @@ def plot_correlations(dtset_ind, ind, dir='', offsets=None, save=False, units=No
         plt.savefig(fig_dir.joinpath(f'{fname}.png').absolute(), format='png', dpi=600, bbox_inches='tight')
         plt.savefig(fig_dir.joinpath(f'{fname}.svg').absolute(), format='svg')
 
+
+def conv_mlip2_to_ase(cfg_path, props=True, elemlist=None):
+    '''Convert cfg structures file to a list of ASE Atoms objects.
+    !! The atomic type in the cfg must be ordered according the alphabetical order of the chemical symbols of the elements present in the systems 
+    
+    Parameters
+    ----------
+    cfg_path: str or Path
+        Path to the cfg file
+    props: bool
+        Read and store the properties
+    elemlist: list
+        List of the chemical symbols of the elements present in the systems
+
+    Returns
+    -------
+    confs: list
+        List of ase.Atoms objects
+    '''
+
+    with open(cfg_path, 'r') as fl:
+        lines = fl.readlines()
+    skip_counting = 0
+    confs = []
+    elemlist = [x for x in set(elemlist)]
+    elemlist.sort()
+    elems = dict()
+    for j, el in enumerate(elemlist):
+        elems[j] = el
+
+    for i, line in enumerate(lines):
+        if skip_counting > 0:
+            skip_counting = skip_counting - 1
+            continue
+        elif 'BEGIN' in line:
+            indices = []
+            positions = []
+            forces = []
+            stress = []
+        elif 'Size' in line:
+            size = int(lines[i+1])
+        elif 'Supercell' in line:
+            cell = []
+            cell.append([float(x) for x in lines[i+1].split()])
+            cell.append([float(x) for x in lines[i+2].split()])
+            cell.append([float(x) for x in lines[i+3].split()])
+            cell = np.array(cell)
+            volume = np.linalg.det(cell)
+            skip_counting = 3
+        elif 'AtomData' in line:
+            for j in range(1, size+1):
+                data = lines[i+j].split()
+                indices.append(int(data[1]))
+                position = [float(data[2]), float(data[3]), float(data[4])]
+                positions.append(position)
+                if props == True:
+                    force = [float(data[5]), float(data[6]), float(data[7])]
+                    forces.append(force)
+            symbols = [elems[x] for x in indices]
+            skip_counting = size
+            
+        elif props == True and 'Energy' in line:
+            energy = float(lines[i+1])
+        elif props == True and 'PlusStress' in line:
+            data = [float(x) for x in lines[i+1].split()]
+            stress = -np.array(data)/volume
         
+        elif 'END_CFG' in line:
+            conf = ase.Atoms(symbols=symbols, positions=positions, cell=cell)
+            if props == True:
+                calc = SinglePointCalculator(atoms=conf, energy=energy, forces=forces, stress=stress)
+                conf.calc = (calc)
+                conf.get_potential_energy()
+            confs.append(conf)
+    return confs
+        
+
+
+    
 
 def conv_ase_to_mlip2(atoms, out_path, props=True):
     '''
@@ -680,14 +758,15 @@ def train_pot_tmp(mlip_bin,
         eval_dir = dir.joinpath('evaluation')
         if not eval_dir.is_dir():
             eval_dir.mkdir(parents=True, exist_ok=True)
+        out_path = eval_dir.joinpath('ML_dataset.cfg')
         calc_efs(mlip_bin.absolute(),
                  mpirun=mpirun, 
                  confs_path=train_set_path.absolute(),
                  pot_path=trained_pot_file_path,
-                 out_path=eval_dir.joinpath('ML_dataset.cfg'),
+                 out_path=out_path,
                  dir=eval_dir.absolute())
         
-        make_comparison(is_ase1=False,
+        errs = make_comparison(is_ase1=False,
                         is_ase2=False,
                         structures1=None, 
                         structures2=None, 
@@ -698,6 +777,10 @@ def train_pot_tmp(mlip_bin,
                         dir=eval_dir,
                         outfile_pref='MLIP-', 
                         units=None)
+    if final_evaluation == True:
+        return trained_pot_file_path, out_path, errs
+    else:
+        return trained_pot_file_path 
         
 def train_pot(mlip_bin, init_path, train_set_path, dir, params, mpirun='', final_evaluation=False):
     '''
@@ -933,19 +1016,29 @@ def train_pot_from_ase_tmp(mlip_bin,
     [at.get_chemical_symbols() for at in train_set]
     species_count = len(set(flatten([at.get_chemical_symbols() for at in train_set])))
     #print('inside train_pot_from_ase_tmp calling for train_pot_tmp')
-    train_pot_tmp(mlip_bin=mlip_bin.absolute(),
-                  untrained_pot_file_dir=untrained_pot_file_dir.absolute(),
-                  mtp_level=mtp_level,
-                  species_count=species_count,
-                  min_dist=min_dist,
-                  max_dist=max_dist,
-                  radial_basis_size=radial_basis_size,
-                  radial_basis_type=radial_basis_type,
-                  train_set_path=cfg_path.absolute(), 
-                  dir=dir.absolute(),
-                  params=params,
-                  mpirun=mpirun,
-                  final_evaluation=final_evaluation)
+    results  = train_pot_tmp(mlip_bin=mlip_bin.absolute(),
+                            untrained_pot_file_dir=untrained_pot_file_dir.absolute(),
+                            mtp_level=mtp_level,
+                            species_count=species_count,
+                            min_dist=min_dist,
+                            max_dist=max_dist,
+                            radial_basis_size=radial_basis_size,
+                            radial_basis_type=radial_basis_type,
+                            train_set_path=cfg_path.absolute(), 
+                            dir=dir.absolute(),
+                            params=params,
+                            mpirun=mpirun,
+                            final_evaluation=final_evaluation)
+    if final_evaluation == False:
+        trained_pot_file_path = results
+        return trained_pot_file_path
+    else:
+        trained_pot_file_path = results[0]
+        ml_trainsetpath = results[1]
+        errs = results[2]
+        elemlist = [x for x in set(flatten([conf.get_chemical_symbols() for conf in train_set]))]
+        ml_trainset = conv_mlip2_to_ase(ml_trainsetpath, props=True, elemlist=elemlist)
+        return trained_pot_file_path, ml_trainset, errs
     
 
 def pot_from_ini(fpath):
