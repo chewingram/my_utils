@@ -371,7 +371,7 @@ def extract_prop_from_ase(structures):
     Returns
     -------
     energy: list fof floats
-            energy PER ATOM of each configuration (in eV/atom)
+            (nuclear potential) energy PER ATOM of each configuration (in eV/atom)
     forces: list of 2D np.arrays of floats
             forces with shape nconfs x natoms x 3 (in eV/Angst)
     stress: list of 2D np.arrays of floats
@@ -385,7 +385,7 @@ def extract_prop_from_ase(structures):
     '''
     if isinstance(structures, Atoms):
         structures = [structures]
-    energy = [x.get_total_energy()/len(x) for x in structures]
+    energy = [x.get_potential_energy()/len(x) for x in structures]
     forces = [x.get_forces() for x in structures]
     stress = [x.get_stress() for x in structures]
     
