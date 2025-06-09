@@ -161,8 +161,7 @@ def conv_mlip2_to_ase(cfg_path, props=True, elemlist=None):
 
 
     
-
-def conv_ase_to_mlip2(atoms, out_path, props=True):
+def conv_ase_to_mlip2_text(atoms, props=True):
     '''
     Convert a trajectory file of ASE into a .cfg file for mlip-2
     Arguments:
@@ -227,6 +226,19 @@ def conv_ase_to_mlip2(atoms, out_path, props=True):
             text += f'{-stress[0]:15.20f}\t{-stress[1]:15.20f}\t{-stress[2]:15.20f}\t{-stress[3]:15.20f}\t{-stress[4]:15.20f}'\
                   + f'\t{-stress[5]:15.20f}\n'
         text += f'END_CFG\n\n'
+    return text
+
+def conv_ase_to_mlip2(atoms, out_path, props=True):
+    '''
+    Convert a trajectory file of ASE into a .cfg file for mlip-2
+    Arguments:
+    atoms(list): list of the Atoms objects (configurations)
+    out_path(str): path to the output file (must include the extension .cfg) 
+    props(bool): if True energy, stress and forces will be copied too (they must have been computed for each configuration in
+                 in the trajectory!); if False no property will be copied.
+    '''
+    text = conv_ase_to_mlip2_text(atoms=atoms, props=props)
+       
     with open(out_path.absolute(), 'w') as fl:
         fl.write(text)
     #print(f'File printed to {out_path}')

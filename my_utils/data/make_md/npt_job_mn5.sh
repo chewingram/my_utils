@@ -27,7 +27,8 @@ echo "threads : $OMP_NUM_THREADS"
 ####################################################################################
 # Load modules and python environment
 module --force purge
-source /gpfs/home/ulie/ulie583683/.bashrc
+#source /gpfs/home/ulie/ulie583683/.bashrc
+source /gpfs/home/ulie/ulie583683/environments/gcc_12.3.0_p3.12.1
 export OMP_NUM_THREADS=1
 #export MKL_NUM_THREADS=1
 

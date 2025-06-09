@@ -24,7 +24,7 @@ if p != None:
     tdp_bin_dir = p
 else:
     tdp_bin_dir = Path('./')
-print(f'tdp bin path: {tdp_bin_dir.absolute()}')
+#print(f'tdp bin path: {tdp_bin_dir.absolute()}')
     
 class logger():
     def __init__(self, filepath):
@@ -795,17 +795,100 @@ def launch_stdep(
     plt.savefig(fname=figpath, bbox_inches='tight', dpi=600, format='png')
 
     
+def conv_iterations(root_dir, nconfs, iters_dir, verbose=True):
+    def fake_print(a):
+        pass
+    if verbose == False:
+        print = fake_print 
+    ifcs = []
+    n_structs = []
+    nconfs_actual = []
+    niters = len(nconfs)
+    for iter in range(1, niters+1):
+        iter_dir = iters_dir.joinpath(f'iter_{iter}')
+        ifc_filepath = iter_dir.joinpath('converged_outfile.forceconstant')
+        if not ifc_filepath.is_file():
+            print(f'Iteration {iter} is not complete (converged ifcs missing). It will be skipped.')
+            continue 
+        unitcell = read(iter_dir.joinpath('infile.ucposcar'), format='vasp')
+        supercell = read(iter_dir.joinpath('infile.ssposcar'), format='vasp')
+        ifc = tdp.parse_outfile_forceconstants(ifc_filepath, unitcell, supercell)
+        ifcs.append(ifc)
+        nconfs_actual.append(nconfs[iter-1])
 
-def conv_size(folders, labels, bin_pref='', unit_label='THz'):
+    if len(ifcs) < 2:
+        print('Less than 2 iterations were complete! Aborting.')
+        return
+    
+    ifcs = np.array(ifcs)
+    ifcs = np.array(ifcs)
+    diffs = np.abs(ifcs[1:] - ifcs[:-1])
+    max_diffs = np.max(diffs, axis=(1, 2, 3, 4))
+    avg_diffs = np.mean(diffs, axis=(1, 2, 3, 4))
+    Fig = plt.figure(figsize=(15,11))
+    Fig.add_subplot(2,1,1)
+    plt.plot(nconfs_actual[1:], max_diffs, '.')
+    plt.title('IFC convergence: max abs. error')
+    plt.ylabel('Error on the IFCs (eV/$\mathrm{\AA}^2$)')
+    plt.xlabel('Number of structures')
+
+    Fig.add_subplot(2,1,2)
+    plt.plot(nconfs_actual[1:], avg_diffs, '.')
+    plt.title('IFC convergence: avg abs. error')
+    plt.ylabel('Error on the IFCs (eV/$\mathrm{\AA}^2$)')
+    plt.xlabel('Number of structures')
+
+    figpath = root_dir.joinpath(f'Convergence.png')
+    plt.savefig(fname=figpath, bbox_inches='tight', dpi=600, format='png')
+    plt.close()
+
+
+
+def conv_sizes(size_folders=None, labels=None, tdep_bin_directory=None, bin_pref='', outimage_path='Convergence_wrt_size.png'):
     
     freqs = []
     doss = []
-    folders = [Path(folder) for folder in folders]
-    iters_dirs = [folder.joinpath('iterations') for folder in folders]
-    n_iters = [max([int(str(x).split('_')[-1]) for x in iters_dir.glob('iter_*')]) for iters_dir in iters_dirs]
+    size_folders = [Path(folder) for folder in size_folders]
+    iters_dirs = [folder.joinpath('iterations') for folder in size_folders]
+   
+    # Filter out non-existing directories
+    valid_sizes = []
+    for size_folder, iters_dir, label in zip(size_folders, iters_dirs, labels):
+        if size_folder.is_dir():
+            valid_sizes.append((size_folder, iters_dir, label))
+        else:
+            print(f'{size_folder.name}/iterations does not exist! It will be ignored.')
+
+    # Re-extract valid folders and iteration directories
+    size_folders = [fp[0] for fp in valid_sizes]
+    iters_dirs = [fp[1] for fp in valid_sizes]
+    labels = [fp[2] for fp in valid_sizes]
+
+
+    iters = [[int(str(x).split('_')[-1])
+                for x in iters_dir.glob('iter_*') 
+                if x.joinpath('converged_outfile.forceconstant').is_file()]
+            for iters_dir in iters_dirs]
+    # Find folders with no converged iterations    
+    to_pop = []
+    for i, itlist in enumerate(iters):
+        if len(itlist) == 0:
+            print(f'{iters_dirs[i].parent.name} has no converged iteration, it will be ignored.')
+            to_pop.append(i)
+    
+    # Remove them from all lists
+    for i in reversed(to_pop):
+        iters.pop(i)
+        iters_dirs.pop(i)
+        size_folders.pop(i)
+        labels.pop(i)
+
+
+    n_iters = [max(x) for x in iters] 
+    
+    
     max_iter = min(n_iters) # the maximum common number of iterations (the minimum among n_iters)
     
-    print(n_iters)
     for i, iter_dir in enumerate(iters_dirs):
         max_iter_dir = iter_dir.joinpath(f'iter_{max_iter}')
         ucell = read(max_iter_dir.joinpath('infile.ucposcar'), format='vasp')
@@ -815,19 +898,42 @@ def conv_size(folders, labels, bin_pref='', unit_label='THz'):
         ph_dir = max_iter_dir.joinpath('phonons')
         ph_dir.mkdir(parents=True, exist_ok=True)
 
-        #tdp.run_phonons(dir=ph_dir, ucell=ucell, scell=scell, ifc_file=ifc_file, qgrid=32, dos=True, bin_pref=bin_pref)
+        tdp.run_phonons(dir=ph_dir, ucell=ucell, scell=scell, ifc_file=ifc_file, qgrid=32, dos=True, tdep_bin_directory=None, bin_pref=bin_pref, units='thz')
         print(ph_dir.joinpath('outfile.phonon_dos.hdf5'))
         fl = h5py.File(ph_dir.joinpath('outfile.phonon_dos.hdf5'))
         freqs.append(np.array(fl['frequencies']))
         doss.append(np.array(fl['dos']))
 
-    print(len(freqs[i]))
     for i, label in enumerate(labels):
         plt.plot(freqs[i], doss[i], label=label, lw=0.5)
-    plt.xlabel(f'Frequency ({unit_label})')
-    plt.ylabel(f'Phonon DOS (states/{unit_label})')
-    plt.legend()
-    plt.savefig(fname='Convergence_wrt_size.png', bbox_inches='tight', dpi=600)
+        plt.xlabel(f'Frequency (THz)')
+        plt.ylabel(f'Phonon DOS (states/THz)')
+        plt.legend()
+        plt.savefig(fname=outimage_path, bbox_inches='tight', dpi=600)
+    plt.close()
     
 
-
+def conv_iters_and_sizes(size_dirs, size_labels, outimage_path='./Convergence_wrt_size.png'):
+    outimage_path = Path(outimage_path)
+    size_dirs = [Path(x) for x in size_dirs]
+    for i_s, size in enumerate(size_labels):
+        size_dir = size_dirs[i_s]
+        if not size_dir.is_dir():
+            print(f'\t{size_dir.name} - not found')
+            continue
+        print(f'\t{size_dir.name} - found')
+        iters_dir = size_dir.joinpath('iterations')
+        iter_dirs = sorted([x for x in iters_dir.glob('iter_*')], key=lambda x: int(x.name.split('_')[-1]))
+        iter_dirs_complete = [x.joinpath('converged_outfile.forceconstant').is_file() for x in iter_dirs]
+        nconfs = []
+        for i_i, iter_dir in enumerate(iter_dirs):
+            if iter_dir.joinpath('new_confs.traj').is_file():
+                nconfs.append(len(read(iter_dir.joinpath('new_confs.traj'), index=':')))
+            else:
+                nconfs.append(0)
+            if iter_dirs_complete[i_i]:
+                print(f'\t\t{iter_dir.name} - complete')
+            else:
+                print(f'\t\t{iter_dir.name} - incomplete (ignored)')
+        conv_iterations(root_dir=size_dir, nconfs=nconfs, iters_dir=iters_dir, verbose=False)
+    conv_sizes(size_folders=size_dirs, labels=size_labels, tdep_bin_directory=None, bin_pref='mpirun -n 6', outimage_path=outimage_path)
