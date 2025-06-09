@@ -913,7 +913,7 @@ def conv_sizes(size_folders=None, labels=None, tdep_bin_directory=None, bin_pref
     plt.close()
     
 
-def conv_iters_and_sizes(size_dirs, size_labels, outimage_path='./Convergence_wrt_size.png'):
+def conv_iters_and_sizes(size_dirs, size_labels, outimage_path='./Convergence_wrt_size.png', bin_pref=''):
     outimage_path = Path(outimage_path)
     size_dirs = [Path(x) for x in size_dirs]
     for i_s, size in enumerate(size_labels):
@@ -936,4 +936,4 @@ def conv_iters_and_sizes(size_dirs, size_labels, outimage_path='./Convergence_wr
             else:
                 print(f'\t\t{iter_dir.name} - incomplete (ignored)')
         conv_iterations(root_dir=size_dir, nconfs=nconfs, iters_dir=iters_dir, verbose=False)
-    conv_sizes(size_folders=size_dirs, labels=size_labels, tdep_bin_directory=None, bin_pref='mpirun -n 6', outimage_path=outimage_path)
+    conv_sizes(size_folders=size_dirs, labels=size_labels, tdep_bin_directory=None, bin_pref=bin_pref, outimage_path=outimage_path)
