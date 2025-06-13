@@ -170,7 +170,7 @@ def conv_ase_to_mlip2_text(atoms, props=True):
     props(bool): if True energy, stress and forces will be copied too (they must have been computed for each configuration in
                  in the trajectory!); if False no property will be copied.
     '''
-    out_path = Path(out_path)
+
     if isinstance(atoms, Atoms):
         atoms = [atoms]
         

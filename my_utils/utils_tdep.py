@@ -13,6 +13,7 @@ from pathlib import Path
 import shutil
 from copy import deepcopy as cp
 from termcolor import colored
+import pickle as pkl
 
 binpath = shutil.which('extract_forceconstants')
 if binpath is not None:
@@ -95,12 +96,12 @@ def merge_confs(n_conf, dir, pref='aims_conf', filename='canonical_structures.tr
             conf = read(fpath.absolute(), format='aims')
             
         except: # e.g. the file is bugged/corrupted AND can't be opened
-            pass
+            continue
 
         if len(conf) != 0:
             confs.append(cp(conf))
         else: # e.g. the file is openable but empty
-            pass
+            continue
 
         fpath.unlink(missing_ok=False) # now we can delete the original file
     if len(confs)>0:
@@ -1191,6 +1192,56 @@ def extract_ifcs(from_infiles = False,
                  temperature = None,
                  bin_prefix = '',
                  tdep_bin_directory = None):
+    """
+    Extract second- and optionally third-order interatomic force constants (IFCs) using TDEP.
+
+    This function is used to launch the extraction of the IFCs with TDEP input. Optionally, a first-order optimization of the unit cell can be 
+    performed prior to the extraction.
+
+    Parameters
+    ----------
+    from_infiles : bool
+        If True, read input files from `infiles_dir`. Otherwise, generate them from provided data.
+    infiles_dir : str or Path
+        Directory containing the TDEP input files (required if `from_infiles` is True).
+    unitcell : ase.Atoms
+        Unit cell structure (ignored if `from_infiles` is True).
+    supercell : ase.Atoms
+        Supercell structure (ignored if `from_infiles` is True).
+    sampling : list of ase.Atoms
+        List of trajectory frames used to generate positions and forces.
+    timestep : float
+        Time step of the MD sampling (in femtoseconds).
+    dir : str or Path
+        Working directory where the IFCs will be extracted.
+    first_order : bool
+        If True, perform a first-order TDEP optimization of the unit cell before extracting IFCs.
+    displ_threshold_firstorder : float
+        Maximum allowed displacement threshold in the first-order optimization (in Å).
+    max_iterations_first_order : int
+        Maximum number of iterations for first-order optimization.
+    rc2 : float
+        Second-order cutoff radius (in Å). Required.
+    rc3 : float or None
+        Third-order cutoff radius (in Å). If None, only second-order IFCs are computed.
+    polar : bool
+        Whether to include LO-TO splitting corrections.
+    loto_filepath : str or Path
+        Path to the file with LO-TO splitting info (required if `polar` is True).
+    stride : int
+        Stride used to sample the MD trajectory.
+    temperature : float
+        Temperature at which to extract IFCs (in K).
+    bin_prefix : str
+        Optional prefix to prepend to TDEP binary calls (e.g., for MPI).
+    tdep_bin_directory : str or Path
+        Path to the TDEP binaries.
+
+    Raises
+    ------
+    TypeError
+        If mandatory parameters are missing or inconsistent.
+    """
     
     
     # FUNCTIONS #
@@ -1542,6 +1593,14 @@ def conv_rc2_extract_ifcs(unitcell = None,
         print_rb(f'The IFC did not converge! You probably need bigger values of rc2!')
 
     ifcs = np.array(ifcs)
+    # let's save the ifcs somewhere, so that they can be analyzed in the future
+    expl = 'This pickle file contains the results of the convergence of IFCs w.r.t. rc2. There are three variables:\n1. this explanatory variabe\n'
+    expl += '2. the list ifcs of shape (n_rc2s,natoms_unit, natoms_super, 3, 3) in eV/Angst^2\n3. the list of rc2s.'
+    results = [expl, ifcs, rc2s[:i_rc2+1]]
+    with open(dir.joinpath('conv_rc2_results.pkl'), 'wb') as fl:
+        pkl.dump(results, fl)
+    
+    last_ifc_path = dir.joinpath(f'rc2_{rc2s[i_rc2]}/outfile.forceconstant') # this might be converged or not, but it's the last made
     diffs = np.array([abs(ifcs[i] - ifcs[i-1]) for i in range(1, ifcs.shape[0])])
     max_diffs = np.max(diffs,axis=(1,2,3,4))
     avg_diffs = np.mean(diffs, axis=(1,2,3,4))
@@ -1562,7 +1621,7 @@ def conv_rc2_extract_ifcs(unitcell = None,
     figpath = dir.joinpath(f'Convergence.png')
     plt.savefig(fname=figpath, bbox_inches='tight', dpi=600, format='png')
     
-    return rc2s[i_rc2]
+    return rc2s[i_rc2], i_rc2, last_ifc_path, converged
 #    return first_converged, max_diffs, avg_diffs
 
     

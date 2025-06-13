@@ -12,6 +12,7 @@ import sys
 from . import utils_tdep as tdp
 from . import utils_mlip as mlp
 from .utils import ln_s_f, min_distance_to_surface
+from .utils import print_b, print_bb, print_g, print_gb, print_kb, print_r, print_rb
 from subprocess import run
 import shutil
 from ase.calculators.singlepoint import SinglePointCalculator
@@ -524,31 +525,31 @@ def old_run_stdep(root_dir=Path('./').absolute(),
         l.log('The maximum number of iteration was reached but the calculation was not converged.')
         exit()
 
-def launch_stdep(
-    root_dir: str = './',
-    ucell=None,
-    make_supercell: bool = False,
-    scell_mat=None,
-    scell=None,
-    T: float = None,
-    preexisting_ifcs: bool = False,
-    preexisting_ifcs_path=None,
-    max_freq: float = None,
-    quantum: bool = True,
-    tdep_bin_directory: str = None,
-    first_order: bool = True,
-    displ_threshold_firstorder: float = 0.0001,
-    max_iterations_first_order: int = None,
-    rc2s: List[float] = None,
-    rc3: float = None,
-    polar: bool = False,
-    loto_infile: str = None,
-    ifc_max_err_threshold: float = None,
-    nconfs: List[int] = None,
-    pref_bin: str = '',
-    mlip_pot_path: str = None,
-    mlip_bin: str = None
-):
+def launch_stdep(root_dir: str = './',
+                ucell=None,
+                make_supercell: bool = False,
+                scell_mat=None,
+                scell=None,
+                T: float = None,
+                preexisting_ifcs: bool = False,
+                preexisting_ifcs_path=None,
+                max_freq: float = None,
+                quantum: bool = True,
+                tdep_bin_directory: str = None,
+                first_order: bool = True,
+                displ_threshold_firstorder: float = 0.0001,
+                max_iterations_first_order: int = None,
+                rc2s: List[float] = None,
+                #rc3: float = None,
+                polar: bool = False,
+                loto_infile: str = None,
+                ifc_diff_threshold: float = None,
+                n_rc2_to_average = 4,
+                conv_criterion_diff = 'avg',
+                nconfs: List[int] = None,
+                pref_bin: str = '',
+                mlip_pot_path: str = None,
+                mlip_bin: str = None):
     """
     Launches the sTDEP iterative workflow for force constant extraction and refinement.
 
@@ -618,7 +619,7 @@ def launch_stdep(
     loto_infile : str or pathlib.Path, optional
         Filepath to the loto splitting infile
     
-    ifc_max_err_threshold : float, optional
+    ifc_diff_threshold : float, optional
         Maximum allowed error threshold (in eV/Å²) to consider the IFCs converged at each iteration.
         Default if 0.0001.
 
@@ -698,10 +699,10 @@ def launch_stdep(
     iters_dir = root_dir.joinpath('iterations')
     iters_dir.mkdir(parents=True, exist_ok=True)
 
-    print('++++++++++++++++++++++++++++++++++++++')
-    print('----------- sTDEP launched -----------')
-    print('++++++++++++++++++++++++++++++++++++++')
-
+    print_kb('++++++++++++++++++++++++++++++++++++++')
+    print_kb('----------- sTDEP launched -----------')
+    print_kb('++++++++++++++++++++++++++++++++++++++')
+    results = []
     # 1. first iteration
     for iter in range(1, niters+1):
         print(f'====== ITERATION n. {iter} ======')
@@ -751,46 +752,113 @@ def launch_stdep(
         min_dist = min([min_distance_to_surface(x.get_cell()) for x in latest_confs_computed]) ##
 
 
+        conv_rc2, i_conv_rc2, last_ifc_path, converged = tdp.conv_rc2_extract_ifcs(unitcell = ucell,
+                                                                    supercell = scell,
+                                                                    sampling = latest_confs_computed,
+                                                                    timestep = 1, # whatever, it's sTDEP
+                                                                    dir = ifc_dir.joinpath('conv_rc2'),
+                                                                    first_order = first_order,
+                                                                    first_order_rc2 = max(rc2s),
+                                                                    displ_threshold_firstorder = displ_threshold_firstorder,
+                                                                    max_iterations_first_order = max_iterations_first_order,
+                                                                    rc2s = rc2s, 
+                                                                    #rc3 = None, 
+                                                                    polar = polar,
+                                                                    loto_filepath = loto_infile,
+                                                                    stride = 1, # it's sTDEP 
+                                                                    temperature = T,
+                                                                    bin_prefix = pref_bin,
+                                                                    tdep_bin_directory = tdep_bin_directory,
+                                                                    ifc_diff_threshold = ifc_diff_threshold,
+                                                                    n_rc2_to_average = n_rc2_to_average,
+                                                                    conv_criterion_diff = conv_criterion_diff)
+        # let's update ucell and scell if first_order was done
+        if first_order == True:
+            unitcell = read(ifc_dir.joinpath('conv_rc2/infiles/infile.ucposcar'), format='vasp')
+            supercell = read(ifc_dir.joinpath('conv_rc2/infiles/infile.ssposcar'), format='vasp')
         
-        last_ifc_path, max_diffs, avg_diffs = tdp.conv_rc2_extract_ifcs(unitcell = ucell,
-                                                                        supercell = scell,
-                                                                        sampling = latest_confs_computed,
-                                                                        timestep = 1,
-                                                                        dir = ifc_dir,
-                                                                        first_order = first_order,
-                                                                        displ_threshold_firstorder = displ_threshold_firstorder,
-                                                                        max_iterations_first_order = max_iterations_first_order,
-                                                                        rc2s = rc2s, 
-                                                                        rc3 = rc3, 
-                                                                        polar = polar,
-                                                                        loto_filepath = loto_infile,
-                                                                        stride = 1, 
-                                                                        temperature = T,
-                                                                        bin_prefix = pref_bin,
-                                                                        tdep_bin_directory = tdep_bin_directory,
-                                                                        max_err_threshold = ifc_max_err_threshold)
+        if converged == False:
+            print_rb(f'For this sTDEP iteration, the IFC did not converge w.r.t. the rc2 values. However, the IFCs obtained with the biggest one ({conv_rc2} Angstroms) will be used.')
         
-        shutil.copy(last_ifc_path, iter_dir.joinpath('converged_outfile.forceconstant'))
-        print(f'============================')
+        results.append([iter-1, conv_rc2, bool(converged)])
+        
+        ln_s_f(last_ifc_path, iter_dir.joinpath('last_outfile.forceconstant'))
+
+    text = 'IFC convergence report for each iteration\n'
+    text = 'N_iter  Last rc2 (Angstroms)  Converged\n'
+    for result in results:
+        text += f'{result[0]+1:{" "}<6}  {result[1]:{" "}<20}  {result[2]:{" "}<9}\n'
+    with open(root_dir.joinpath('IFC_convergence_report.dat'), 'w') as fl:
+        fl.write(text)
+
+    
+    converged_list = np.array([result[2] for result in results])
 
     # check if IFC convergence through the iterations
     ifcs = []
     n_structs = []
+    root_dir = Path('./')
+    colors = {True:'blue', False:'red'}
+    labels = {True:'IFC converged', False:'IFC not converged'}
+    niters = len(nconfs)
+    iters_dir = Path('./iterations')
     for iter in range(1, niters+1):
         iter_dir = iters_dir.joinpath(f'iter_{iter}')
-        unitcell = read(iter_dir.joinpath('infile.ucposcar'), format='vasp')
-        supercell = read(iter_dir.joinpath('infile.ssposcar'), format='vasp')
-        ifc = tdp.parse_outfile_forceconstants(iter_dir.joinpath('converged_outfile.forceconstant'), unitcell, supercell)
+        unitcell = read(iter_dir.joinpath('ifc/conv_rc2/infiles/infile.ucposcar'), format='vasp')
+        supercell = read(iter_dir.joinpath('ifc/conv_rc2/infiles/infile.ssposcar'), format='vasp')
+        ifc = tdp.parse_outfile_forceconstants(iter_dir.joinpath('last_outfile.forceconstant'), unitcell, supercell)
         ifcs.append(ifc)
     ifcs = np.array(ifcs)
     ifcs = np.array(ifcs)
     diffs = np.abs(ifcs[1:] - ifcs[:-1])
     max_diffs = np.max(diffs, axis=(1, 2, 3, 4))
+    avg_diffs = np.mean(diffs, axis=(1, 2, 3, 4))
     Fig = plt.figure(figsize=(15,4))
-    plt.plot(nconfs[1:], max_diffs, '.')
+    Fig.add_subplot(1,2,1)
+    for i_p in range(len(converged_list[1:])):
+        plt.plot(nconfs[1+i_p], max_diffs[i_p], '.', color=colors[converged_list[i_p+1]])
     plt.title('IFC convergence: max abs. error')
     plt.ylabel('Error on the IFCs (eV/$\mathrm{\AA}^2$)')
     plt.xlabel('Number of structures')
+    if any(converged_list[1:] == False):
+        red_i = np.where(converged_list[1:] == False)[0][0]
+        blue_i = np.where(converged_list[1:] == True)[0][0]
+        print(red_i, blue_i)
+        legend_list = ['_nolegend_' for i in range(min(red_i, blue_i))]
+        print(f'labels of min: {labels[converged_list[1:][min(red_i, blue_i)]]}')
+        legend_list.append(labels[converged_list[1:][min(red_i, blue_i)]])
+        legend_list.extend(['_nolegend_' for i in range(abs(red_i-blue_i-1))])
+        print(f'labels of max ({max(red_i, blue_i)}): {labels[converged_list[1:][max(red_i, blue_i)]]}')
+        legend_list.append(labels[converged_list[1:][max(red_i, blue_i)]])
+        legend_list.extend(['_nolegend_' for i in range(len(converged_list[1:])-max(red_i, blue_i)-1)])
+    else:
+        legend_list = [labels[True]]
+
+    print(legend_list)
+    plt.legend(legend_list)
+
+
+    Fig.add_subplot(1,2,2)
+    for i_p in range(len(converged_list[1:])):
+        plt.plot(nconfs[1+i_p], avg_diffs[i_p], '.', color=colors[converged_list[i_p+1]])
+    plt.title('IFC convergence: avg abs. error')
+    plt.ylabel('Error on the IFCs (eV/$\mathrm{\AA}^2$)')
+    plt.xlabel('Number of structures')
+    if any(converged_list[1:] == False):
+        red_i = np.where(converged_list[1:] == False)[0][0]
+        blue_i = np.where(converged_list[1:] == True)[0][0]
+        print(red_i, blue_i)
+        legend_list = ['_nolegend_' for i in range(min(red_i, blue_i))]
+        print(f'labels of min: {labels[converged_list[1:][min(red_i, blue_i)]]}')
+        legend_list.append(labels[converged_list[1:][min(red_i, blue_i)]])
+        legend_list.extend(['_nolegend_' for i in range(abs(red_i-blue_i-1))])
+        print(f'labels of max ({max(red_i, blue_i)}): {labels[converged_list[1:][max(red_i, blue_i)]]}')
+        legend_list.append(labels[converged_list[1:][max(red_i, blue_i)]])
+        legend_list.extend(['_nolegend_' for i in range(len(converged_list[1:])-max(red_i, blue_i)-1)])
+    else:
+        legend_list = [labels[True]]
+    print(legend_list)
+    plt.legend(legend_list)
     figpath = root_dir.joinpath(f'Convergence.png')
     plt.savefig(fname=figpath, bbox_inches='tight', dpi=600, format='png')
 
