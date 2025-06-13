@@ -1361,7 +1361,7 @@ def extract_ifcs(from_infiles = False,
     print('Here are the parameters for the IFCs extraction:')
     print(f'\t2nd-order cutoff: ' +colored(f'{rc2} Angstroms', 'blue'))
     print(f'\tTemperature: ' +colored(f'{temperature}', 'blue'))
-    if rc3 == '':
+    if rc3 == None:
         print('\tNo 3-rd order interactions')
     else:
         print('\t3rd-order cutoff: ' + colored(f'{rc3} Angstroms', 'blue'))
