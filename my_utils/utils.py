@@ -10,6 +10,7 @@ from PIL import Image
 import logging
 from scipy.stats import linregress
 from ase.io import read, write
+from termcolor import colored
 
 
 def mkdir_warner(dir_path, interactive=False):
@@ -409,7 +410,7 @@ def path(path):
         path = path + '/'
     return path
 
-def ln_s_f(origin, dest):
+def ln_s_f_absolute(origin, dest):
     path1 = Path(origin)
     path2 = Path(dest)
     #print(path1, path2)
@@ -417,6 +418,30 @@ def ln_s_f(origin, dest):
         os.system(f'ln -s -f {path1.absolute()} {path2.joinpath(path1.name).absolute()}')
     else:
         os.system(f'ln -s -f {path1.absolute()} {path2.absolute()}')
+
+
+def ln_s_f(origin, dest):
+    origin = Path(origin)
+    dest = Path(dest)
+
+    # Resolve the target for linking (absolute file path), but preserve the symlink's own name
+    origin_display_name = origin.name if not origin.is_symlink() else origin
+
+    # Compute the destination path (link location)
+    if dest.is_dir():
+        link_path = dest / origin.name  # Keep the name of the symlink itself
+    else:
+        link_path = dest
+
+    # Compute relative path to the target (dereference symlinks only at execution time)
+    rel_target = os.path.relpath(origin.resolve(), start=link_path.parent)
+
+    # Remove existing file/symlink if present
+    if link_path.exists() or link_path.is_symlink():
+        link_path.unlink()
+
+    # Create symbolic link with relative target
+    link_path.symlink_to(rel_target)
         
         
 
@@ -758,3 +783,26 @@ def giffy(*argv):
 
     imgdir.rmdir()
     print(f"GIF saved as {filename}")
+
+
+
+def print_r(txt):
+        print(colored(txt, 'red'))
+    
+def print_rb(txt):
+    print(colored(txt, 'red', attrs=["bold"]))
+
+def print_g(txt):
+    print(colored(txt, 'green'))
+
+def print_gb(txt):
+    print(colored(txt, 'green', attrs=["bold"])) 
+
+def print_b(txt):
+    print(colored(txt, 'blue'))
+
+def print_bb(txt):
+    print(colored(txt, 'blue', attrs=["bold"]))
+
+def print_kb(txt):
+    print(colored(txt, 'black', attrs=["bold"]))

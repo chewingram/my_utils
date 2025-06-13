@@ -3,6 +3,7 @@ from ase.io import read, write
 from ase.build import make_supercell
 import sys
 from .utils import from_list_of_numbs_to_text, data_reader, ln_s_f
+from .utils import print_b, print_bb, print_g, print_gb, print_kb, print_r, print_rb
 import os
 from subprocess import run
 from math import floor, ceil
@@ -11,6 +12,7 @@ from matplotlib import pyplot as plt
 from pathlib import Path
 import shutil
 from copy import deepcopy as cp
+from termcolor import colored
 
 binpath = shutil.which('extract_forceconstants')
 if binpath is not None:
@@ -1209,7 +1211,13 @@ def extract_ifcs(from_infiles = False,
     #############
 
 
+    print_kb('**** Extraction of IFCs with TDEP ****')
+
+
     dir = Path(dir)
+    if not dir.is_dir():
+        dir.mkdir(parents=True, exist_ok=True)
+
 
     if from_infiles == True:
         if infiles_dir is None:
@@ -1220,44 +1228,42 @@ def extract_ifcs(from_infiles = False,
         if any([unitcell is None, supercell is None, sampling is None]):
             raise TypeError('Since from_infiles is False, you must provide the unitcell, the supercell and the sampling trajectory!')
         
-    if first_order == True:
-        first_order = '--firstorder'
-    else:
-        first_order = ''
 
     if rc2 is None:
         raise TypeError('rc2 is mandatory!')
     else:
-        rc2 = f'-rc2 {rc2}'
+        rc2_cmd = f'-rc2 {rc2}'
     
     if rc3 is None:
-        rc3 = ''
+        rc3_cmd = ''
     else:
-        rc3 = f'-rc3 {rc3}'
+        rc3_cmd = f'-rc3 {rc3}'
     
     if polar == True:
         if loto_filepath is None:
             raise TypeError('Since polar is True, you must provide loto_filepath!')
         else:
-            polar = '--polar'
+            polar_cmd = '--polar'
             loto_filepath = Path(loto_filepath)
     else:
-        polar = ''
+        polar_cmd = ''
 
     if tdep_bin_directory is None or tdep_bin_directory == '':
         tdep_bin_directory = g_tdep_bin_directory
     else:
         tdep_bin_directory = Path(tdep_bin_directory) # if it's already a Path(), this won't change anything
     
-    stride = f'--stride {stride}'
+    stride_cmd = f'--stride {stride}'
 
-    temperature = f'--temperature {temperature}'
+    temperature_cmd = f'--temperature {temperature}'
 
 
     #infiles_dir = Path(dir.joinpath('infiles'))
     #infiles_dir.mkdir(parents=True, exist_ok=True)
+
     if from_infiles == True:
         ln_s_f(src_infiles_dir.joinpath('infile.ucposcar'), dir)
+        os.system(f'ls {dir}')
         ln_s_f(src_infiles_dir.joinpath('infile.ssposcar'), dir)
         ln_s_f(src_infiles_dir.joinpath('infile.meta'), dir)
         ln_s_f(src_infiles_dir.joinpath('infile.stat'), dir)
@@ -1269,65 +1275,66 @@ def extract_ifcs(from_infiles = False,
         write(dir.joinpath('infile.ucposcar'), unitcell, format='vasp')
         write(dir.joinpath('infile.ssposcar'), supercell, format='vasp')
         make_stat(sampling, dir)
-        make_meta(sampling, dir, timestep=timestep, temp=100)
+        make_meta(sampling, dir, timestep=timestep, temp=temperature)
         make_forces(sampling, dir)
         make_positions(sampling, dir)
 
-    if polar == '--polar':
+    if polar == True:
         ln_s_f(loto_filepath, dir.joinpath('infile.lotosplitting'))
     
-    cmd = f'{bin_prefix} {tdep_bin_directory.joinpath("extract_forceconstants")} {first_order} {rc2} {rc3} {temperature} {polar} {stride}'
-    if first_order == '':
-        logpath = dir.joinpath('log_ifc')
-        errpath = dir.joinpath('err_ifc')
-        with open(logpath.absolute(), 'w') as log, open(errpath.absolute(), 'w') as err:
-            run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)
+    if first_order == True:
+        print_b('You asked for the first-order TDEP optimization of the unitcell; it will be done using the value of rc2 you provided.')
+        fo_dir = dir.joinpath('first_order_optimisation')
+        unitcell, supercell, converged = first_order_optimization(from_infiles = from_infiles,
+                                                    infiles_dir = infiles_dir,
+                                                    unitcell = unitcell,
+                                                    supercell = supercell,
+                                                    sampling = sampling,
+                                                    timestep = timestep,
+                                                    dir = fo_dir,
+                                                    displ_threshold_firstorder = displ_threshold_firstorder,
+                                                    max_iterations_first_order = max_iterations_first_order,
+                                                    rc2 = rc2,
+                                                    polar = polar,
+                                                    loto_filepath = loto_filepath,
+                                                    stride = stride,
+                                                    temperature = temperature,
+                                                    bin_prefix = bin_prefix,
+                                                    tdep_bin_directory = tdep_bin_directory)
+
+        if converged == False:
+            print(colored('The first-order optimization did not converge. However, the last unitcell generated in the process will be used.', 'yellow'))
+        ln_s_f(fo_dir.joinpath(f'optimized_unitcell.poscar'), dir.joinpath('infile.ucposcar'))
+        ln_s_f(fo_dir.joinpath(f'optimized_supercell.poscar'), dir.joinpath('infile.ssposcar'))
+
+    print('Here are the parameters for the IFCs extraction:')
+    print(f'\t2nd-order cutoff: ' +colored(f'{rc2} Angstroms', 'blue'))
+    print(f'\tTemperature: ' +colored(f'{temperature}', 'blue'))
+    if rc3 == '':
+        print('\tNo 3-rd order interactions')
     else:
-        ucells = [unitcell]
-        print('First order is True! Let\'s start the iterative optimization of the unitcell!')
-        mat = supercell.get_cell() @ np.linalg.inv(unitcell.get_cell())
-        # first iteration
-        print(f'Iteration 1:')
-        logpath = dir.joinpath('log_ifc')
-        errpath = dir.joinpath('err_ifc')
-        with open(logpath.absolute(), 'w') as log, open(errpath.absolute(), 'w') as err:
-            run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)
-        ucells.append(read(dir.joinpath('outfile.new_ucposcar'), format='vasp'))
-        dir.joinpath('infile.ucposcar').unlink()
-        move(dir.joinpath('outfile.new_ucposcar'), dir.joinpath('infile.ucposcar'))
-        new_unitcell = ucells[-1]
-        new_supercell = make_supercell(new_unitcell, mat)
-        dir.joinpath('infile.ssposcar').unlink()
-        write(dir.joinpath('infile.ssposcar'), new_supercell, format='vasp')
-        dir.joinpath('outfile.new_ssposcar').unlink()
+        print('\t3rd-order cutoff: ' + colored(f'{rc3} Angstroms', 'blue'))
+    
+    print('\tNo 4th-order interactions') # this could be implemented quite easily; it should laready be in TDEP
 
-        
-        # next iterations
-        for i in range(max_iterations_first_order-1):
-            print(f'Iteration {i+2}:')
-            with open(logpath.absolute(), 'w') as log, open(errpath.absolute(), 'w') as err:
-                run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)
-            ucells.append(read(dir.joinpath('outfile.new_ucposcar'), format='vasp'))
-            converged, err = check_convergence_positions(dir, displ_threshold_firstorder)
-            print(f'\tMaximum difference in position: {err.max()} Angstrom')
-            dir.joinpath('infile.ucposcar').unlink()
-            move(dir.joinpath('outfile.new_ucposcar'), dir.joinpath('infile.ucposcar'))
-            new_unitcell = ucells[-1]
-            new_supercell = make_supercell(new_unitcell, mat)
-            dir.joinpath('infile.ssposcar').unlink()
-            write(dir.joinpath('infile.ssposcar'), new_supercell, format='vasp')
-            dir.joinpath('outfile.new_ssposcar').unlink()
-            
-            if converged:
-                print(f'Convergence reached at iteration {i+2} ({err.max()} < {displ_threshold_firstorder})!')
-                print('infile.ucposcar and infile.ssposcar now contain the optimized cells.')
-                break 
+    if bin_prefix == '':
+        print(f'\tNo binary prefix')
+    else:
+        print(f'\tBinary prefix: ' +colored(f'{bin_prefix}', 'blue'))
+    if polar == True:
+        print('\tPolar correction (LO-TO): ' + colored('yes', 'blue'))
+    else:
+        print('\tPolar correction (LO-TO): ' + colored('no', 'blue'))
+    print(f'\tStride: ' +colored(f'{stride}', 'blue'))
+    
+    cmd = f'{bin_prefix} {tdep_bin_directory.joinpath("extract_forceconstants")} {rc2_cmd} {rc3_cmd} {temperature_cmd} {polar_cmd} {stride_cmd}'
 
-            if i == max_iterations_first_order - 1:
-                print('ATTENTION! The maximum number of iterations was reached without convergence!')
-        
-        #write('ucells.traj', ucells)
-            
+    logpath = dir.joinpath('log_ifc')
+    errpath = dir.joinpath('err_ifc')
+    with open(logpath.absolute(), 'w') as log, open(errpath.absolute(), 'w') as err:
+        run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)
+    print_kb('****** ' + colored('Extraction of IFCs done!', 'green') + ' ******') 
+
             
 def conv_rc2_extract_ifcs(unitcell = None,
                           supercell = None,
@@ -1335,19 +1342,93 @@ def conv_rc2_extract_ifcs(unitcell = None,
                           timestep = 1,
                           dir = './',
                           first_order = False,
+                          first_order_rc2 = None,
                           displ_threshold_firstorder = 0.0001,
                           max_iterations_first_order = 20,
                           rc2s = None, 
-                          rc3 = None, 
+                          #rc3 = None, 
                           polar = False,
                           loto_filepath = None, 
                           stride = 1, 
                           temperature = None,
                           bin_prefix = '',
                           tdep_bin_directory = None,
-                          max_err_threshold = 0.001): # eV/A^2
+                          ifc_diff_threshold = 0.001, # eV/A^2
+                          n_rc2_to_average = 4,
+                          conv_criterion_diff = 'avg'): 
     
+    """Function to extract the IFCs converging them w.r.t. the rc2 values.
+    It is possible to run a first-order TDEP optimisation of the unitcell before extracting the IFCs and it will be done using a rc2
+    specific for this stage (`first_order_rc2` or `max(rc2s)` if the first one is None). The same optimised unitcell is then used for all
+    the IFCs extractions with the several rc2 (in `rc2s`).
+    The convergence of the IFCs is assessed by evaluating the average differences in the IFCs between the last rc2 value, and the N before,
+    and averaging these N average differences (N = `n_rc2_to_average`).  
+
+    Parameters
+    ----------
+    unitcell : ase.Atoms
+        The unit cell.
+    supercell : ase.Atoms
+        The supercell: must be obtained by repetition of the unitcell via a matrix multiplication!.
+    sampling : list or ASE trajectory
+        The trajectory used for statistical sampling.
+    timestep : float
+        Timestep in fs.
+    dir : str or Path
+        Root directory in which to perform the convergence process.
+    first_order : bool
+        If True, run a first-order TDEP optimization of the unitcell.
+    first_order_rc2 : float or None
+        The rc2 cutoff to be used for the first-order optimization.
+        If None, the maximum value in `rc2s` will be used.
+    displ_threshold_firstorder : float
+        Convergence threshold for atomic displacements during first-order optimization (in Å).
+    max_iterations_first_order : int
+        Maximum number of iterations allowed in the first-order optimization.
+    rc2s : list of float
+        List of second-order cutoff radii (in Å) to test for convergence.
+    polar : bool
+        Whether to include LO-TO splitting (polar correction).
+    loto_filepath : str or Path
+        Path to the LO-TO splitting file, required if `polar=True`.
+    stride : int
+        Stride for sampling frames in TDEP input generation.
+    temperature : float
+        Temperature (in K).
+    bin_prefix : str
+        Optional prefix to prepend to TDEP binary calls (e.g. "srun -n 4").
+    tdep_bin_directory : str or Path
+        Path to the TDEP binaries.
+    ifc_diff_threshold : float
+        Threshold (in eV/Å²) for convergence assessment.
+    n_rc2_to_average : int
+        Number of previous `rc2` IFCs to average over for convergence assessment.
+    conv_criterion_diff : str
+        Criterion for convergence: 'avg' for average difference, 'max' for max difference.
+
+    Returns
+    -------
+    float
+        The value of `rc2` (from `rc2s`) at which the IFCs are considered converged.
+        If convergence is not reached, returns the last rc2 value tested.
+
+    Raises
+    ------
+    ValueError
+        If input consistency checks fail (e.g., too few rc2s, invalid convergence criterion).
+    
+    Notes
+    -----
+    - IFCs are extracted in subfolders named `rc2_<value>` under the main `dir`.
+    - A convergence plot (avg/max IFC error vs rc2) is saved as `Convergence.png`.
+    - All generated input files are stored in the `infiles` subdirectory.
+    - If `first_order=True`, the optimized unitcell is reused for all `rc2` values.
+    """
+    print_kb('**** IFCs convergence with respect to the 2nd-order cutoff ****')
+
     dir = Path(dir)
+    if not dir.is_dir():
+        dir.mkdir(parents=True, exist_ok=True)
 
     infiles_dir = dir.joinpath('infiles')
     infiles_dir.mkdir(parents=True, exist_ok=True)
@@ -1358,10 +1439,47 @@ def conv_rc2_extract_ifcs(unitcell = None,
     make_forces(sampling, infiles_dir)
     make_positions(sampling, infiles_dir)
 
-    print('Launching convergence of IFCs with respect to the 2nd order cutoff')
+    if conv_criterion_diff not in ['avg', 'max']:
+        raise ValueError('conv_criterion_diff must be either \'avg\' or \'max\'!')
+    
+    if len(rc2s) <= n_rc2_to_average:
+        raise ValueError(f'You asked to assess the convergence by averaging the last {n_rc2_to_average} extractions, but you provided less than {n_rc2_to_average} + 1 values of rc2!')
+    
+    if first_order == True:
+        if first_order_rc2 == None:
+            first_order_rc2 = max(rc2s)
+            print_b('You asked for the first-order TDEP optimization of the unitcell; it will be done using the biggest value of rc2 you provided.')
+        else:
+            print_b(f'You asked for the first-order TDEP optimization of the unitcell; it will be done using the rc2 value you provided for this stage ({first_order_rc2} Angstroms).')
+        
+        fo_dir = dir.joinpath('first_order_optimisation')
+        optimised_ucell, optimised_scell, converged = first_order_optimization(from_infiles = False,
+                                                   unitcell = unitcell,
+                                                   supercell = supercell,
+                                                   sampling = sampling,
+                                                   timestep = timestep,
+                                                   dir = fo_dir,
+                                                   displ_threshold_firstorder = displ_threshold_firstorder,
+                                                   max_iterations_first_order = max_iterations_first_order,
+                                                   rc2 = first_order_rc2,
+                                                   polar = polar,
+                                                   loto_filepath = loto_filepath,
+                                                   stride = stride,
+                                                   temperature = temperature,
+                                                   bin_prefix = bin_prefix,
+                                                   tdep_bin_directory = tdep_bin_directory)
+        if converged == False:
+            print(colored('The first-order optimization did not converge. However, the last unitcell generated in the process will be used.', 'yellow'))
+        unitcell = optimised_ucell
+        supercell = optimised_scell
+        ln_s_f(fo_dir.joinpath(f'optimized_unitcell.poscar'), infiles_dir.joinpath('infile.ucposcar'))
+        ln_s_f(fo_dir.joinpath(f'optimized_supercell.poscar'), infiles_dir.joinpath('infile.ssposcar'))
+
+    print('Starting the extraction for each rc2 value')
+
     ifcs = []
-    for rc2 in rc2s:
-        print(f'+++ rc2 = {rc2} +++')
+    for i_rc2, rc2 in enumerate(rc2s):
+        print_b(f'+++ rc2 = {rc2} Angstroms +++')
         rc2_dir = dir.joinpath(f'rc2_{rc2}')
         rc2_dir.mkdir(parents=True, exist_ok=True)
         extract_ifcs(from_infiles = True,
@@ -1371,53 +1489,81 @@ def conv_rc2_extract_ifcs(unitcell = None,
                 sampling = None, # no need
                 timestep = timestep,
                 dir = rc2_dir,
-                first_order = first_order,
-                displ_threshold_firstorder = displ_threshold_firstorder,
-                max_iterations_first_order = max_iterations_first_order,
+                first_order = False,
+                displ_threshold_firstorder = None,
+                max_iterations_first_order = None,
                 rc2 = rc2, 
-                rc3 = rc3, 
+                #rc3 = rc3, 
                 polar = polar,
                 loto_filepath = loto_filepath, 
                 stride = stride, 
                 temperature = temperature,
                 bin_prefix = bin_prefix,
                 tdep_bin_directory = tdep_bin_directory)
-        print(f'--------------')
-        ifcs.append(parse_outfile_forceconstants(rc2_dir.joinpath('outfile.forceconstant'), unitcell, supercell))
+        
+        new_ifcs = parse_outfile_forceconstants(rc2_dir.joinpath('outfile.forceconstant'), unitcell, supercell) # shape: n_atoms_ucell, n_atoms_scell, 3, 3
+        ifcs.append(new_ifcs)  
+
+        converged = False
+        if i_rc2 >= n_rc2_to_average:
+            print('Assessing the convergence')
+            cifcs = np.array(ifcs.copy()) # "c" stands for copy; shape: n_rc2_done, n_atoms_ucell, n_atoms_scell, 3, 3
+            diffss = np.abs(cifcs[-1][np.newaxis,:] - cifcs[-1-n_rc2_to_average:-1]) # shape: n_rc2_to_average, n_atoms_ucell, n_atoms_scell, 3, 3
+            avg_diffss = np.mean(diffss, axis=(1,2,3,4)) # shape: n_rc2_to_average
+            avg_avg_diff = np.mean(avg_diffss)
+            max_diffss = np.max(diffss, axis=(1,2,3,4)) # shape: n_rc2_to_average
+            avg_max_diff = (np.mean(max_diffss))
+            
+            if conv_criterion_diff == 'avg':
+                value_to_compare_txt = 'average'
+                value_to_compare = avg_avg_diff
+            elif conv_criterion_diff == 'max':
+                value_to_compare_txt = 'maximum'
+                value_to_compare = avg_max_diff
+            
+            print(f'Maximum difference in the IFCs, averaged over the last {n_rc2_to_average} extractions: {avg_max_diff} eV/Angstrom^2')
+            print(f'Average difference in the IFCs, averaged over the last {n_rc2_to_average} extractions: {avg_avg_diff} eV/Angstrom^2')
+
+            if value_to_compare < ifc_diff_threshold:
+                text = colored(f'Since {value_to_compare_txt} = {value_to_compare} < {ifc_diff_threshold} (ev/Angstrom^2), ', 'green')
+                text += colored(f'the IFCs can be considered converged with rc2 = {rc2} Angstroms!', 'green', attrs=['bold'])
+                print(text)
+                converged = True
+                i_conv = i_rc2
+                break
+
+        else:
+            if i_rc2 + 1 == 1:
+                print(f'Skipping the convergence assessment, as only {i_rc2+1} rc2 value has been done and we need to average over {n_rc2_to_average} extractions')
+            else:    
+                print(f'Skipping the convergence assessment, as only {i_rc2+1} rc2 values have been done and we need to average over {n_rc2_to_average} extractions')
+
+    if converged == False:
+        print_rb(f'The IFC did not converge! You probably need bigger values of rc2!')
+
     ifcs = np.array(ifcs)
     diffs = np.array([abs(ifcs[i] - ifcs[i-1]) for i in range(1, ifcs.shape[0])])
     max_diffs = np.max(diffs,axis=(1,2,3,4))
     avg_diffs = np.mean(diffs, axis=(1,2,3,4))
 
-
     Fig = plt.figure(figsize=(15,4))
     Fig.add_subplot(1,2,1)
-    plt.plot(rc2s[1:], max_diffs, '.')
+    plt.plot(rc2s[1:i_rc2+1], max_diffs, '.')
     plt.title('IFC convergence: max abs. error')
     plt.ylabel('Error on the IFCs (eV/$\mathrm{\AA}^2$)')
     plt.xlabel('rc2 ($\mathrm{\AA}$)')
     
     Fig.add_subplot(1,2,2)
-    plt.plot(rc2s[1:], avg_diffs, '.')
+    plt.plot(rc2s[1:i_rc2+1], avg_diffs, '.')
     plt.title('IFC convergence: avg abs. error')
     plt.ylabel('Error on the IFCs (eV/$\mathrm{\AA}^2$)')
     plt.xlabel('rc2 ($\mathrm{\AA}$)')
     
     figpath = dir.joinpath(f'Convergence.png')
     plt.savefig(fname=figpath, bbox_inches='tight', dpi=600, format='png')
-
-    for i, max_diff in enumerate(max_diffs):
-        #print(f'now comparing the max_diff {max_diff} with {max_err_threshold}')
-        if max_diff < max_err_threshold:
-            first_converged = dir.joinpath(f'rc2_{rc2s[i]}/outfile.forceconstant')
-            #print('converged!')
-        else:
-            #print('not converged...')
-            pass
-    if first_converged is None:
-        print('!!!IFCs did not converge with respect to the second order cutoff. You need higher values of rc2!')
-        first_converged = dir.joinpath(f'rc2_{rc2s[len(max_diffs)-1]}/outfile.forceconstant')
-    return first_converged, max_diffs, avg_diffs
+    
+    return rc2s[i_rc2]
+#    return first_converged, max_diffs, avg_diffs
 
     
 
@@ -1477,7 +1623,7 @@ def parse_outfile_forceconstants(filepath, unitcell, supercell):
             ifc[i,j] += tens
         k += 1+5*nns
 
-    return ifc
+    return ifc # shape n_atoms_unitcell, n_atoms_supercell, 3, 3
 
 
 def run_phonons(dir, ucell, scell, ifc_file, qgrid=32, tdep_bin_directory=None, bin_pref='', dos=False, units='thz'):
@@ -1500,3 +1646,249 @@ def run_phonons(dir, ucell, scell, ifc_file, qgrid=32, tdep_bin_directory=None, 
     print(cmd)
     with open(logpath.absolute(), 'w') as log, open(errpath.absolute(), 'w') as err:
             run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)
+
+def first_order_optimization(from_infiles=False,
+                             infiles_dir=None,
+                            unitcell = None,
+                            supercell = None,
+                            sampling = None,
+                            timestep = 1,
+                            dir = './',
+                            displ_threshold_firstorder = 0.0001,
+                            max_iterations_first_order = 20,
+                            rc2 = None, 
+                            polar = False,
+                            loto_filepath = None, 
+                            stride = 1, 
+                            temperature = None,
+                            bin_prefix = '',
+                            tdep_bin_directory = None):
+    """Perform first-order TDEP optimization of atomic positions in the unit cell.
+
+    This function iteratively refines the atomic positions of the unit cell using 
+    first-order force constants extracted via TDEP, until the maximum atomic displacement 
+    between iterations falls below a given threshold (`displ_threshold_firstorder`), 
+    or until the maximum number of iterations is reached.
+
+    Parameters
+    ----------
+    from_infiles : bool
+        If True, use input files from `infiles_dir`. Otherwise, use provided `unitcell`, 
+        `supercell`, and `sampling` data.
+    infiles_dir : str or Path
+        Path to directory containing the TDEP input files, required if `from_infiles` is True.
+    unitcell : ase.Atoms
+        Initial unit cell structure.
+    supercell : ase.Atoms
+        Initial supercell structure.
+    sampling : list of ase.Atoms
+        List of trajectory frames used to extract forces and displacements.
+    timestep : float
+        Time step in femtoseconds used in the MD sampling (anything is fine if it's sTDEP).
+    dir : str or Path
+        Directory in which to perform the optimization and store intermediate files.
+    displ_threshold_firstorder : float
+        Convergence threshold for maximum atomic displacement (in Å).
+    max_iterations_first_order : int
+        Maximum number of optimization iterations.
+    rc2 : float
+        Second-order interaction cutoff radius (in Å).
+    polar : bool
+        Whether to include LO-TO splitting corrections.
+    loto_filepath : str or Path
+        Path to the `infile.lotosplitting` file (required if `polar` is True).
+    stride : int
+        Stride for reading the MD sampling trajectory.
+    temperature : float
+        Temperature (in K).
+    bin_prefix : str
+        Optional prefix for the TDEP binary call (e.g., to run with MPI).
+    tdep_bin_directory : str or Path
+        Path to the directory containing the TDEP binaries.
+
+    Returns
+    -------
+    conv_unitcell : ase.Atoms
+        The optimized unit cell.
+    conv_supercell : ase.Atoms
+        The supercell generated from the optimized unit cell.
+
+    Raises
+    ------
+    RuntimeError
+        If the structure does not converge within the allowed number of iterations.
+    TypeError
+        If required arguments are missing or inconsistent.
+    """
+    
+    # FUNCTIONS 
+    
+    def check_convergence_positions(dir, displ_threshold_firstorder):
+        old_uc = read(dir.joinpath('infile.ucposcar'), format='vasp')
+        old_positions = old_uc.get_positions()
+        old_red_positions = old_uc.get_scaled_positions()
+        new_uc = read(dir.joinpath('outfile.new_ucposcar'), format='vasp')
+        new_positions = new_uc.get_positions()
+        new_red_positions = new_uc.get_scaled_positions()
+        err = new_positions - old_positions
+        red_err = new_red_positions - old_red_positions
+
+        if (err >= displ_threshold_firstorder).any():
+            return False, err, red_err
+        else:
+            return True, err, red_err
+    
+    def move(src, dest):
+        at = read(src, format='vasp')
+        write(dest, at, format='vasp')
+        src.unlink()
+    
+    ############
+
+    print_kb('**** First-order TDEP optimization of the unitcell ****')
+    dir = Path(dir)
+    if not dir.is_dir():
+        dir.mkdir(parents=True, exist_ok=True)
+
+    if from_infiles == True:
+        if infiles_dir is None:
+            raise TypeError('Since from_infiles is True, you must provide infiles_dir!')
+        else:
+            src_infiles_dir = Path(infiles_dir)
+    else:
+        if any([unitcell is None, supercell is None, sampling is None]):
+            raise TypeError('Since from_infiles is False, you must provide the unitcell, the supercell and the sampling trajectory!')
+
+    if rc2 is None:
+        raise TypeError('rc2 is mandatory!')
+    else:
+        rc2_cmd = f'-rc2 {rc2}'
+
+    
+    if polar == True:
+        if loto_filepath is None:
+            raise TypeError('Since polar is True, you must provide loto_filepath!')
+        else:
+            polar_cmd = '--polar'
+            loto_filepath = Path(loto_filepath)
+    else:
+        polar_cmd = ''
+
+    if tdep_bin_directory is None or tdep_bin_directory == '':
+        tdep_bin_directory = g_tdep_bin_directory
+    else:
+        tdep_bin_directory = Path(tdep_bin_directory) # if it's already a Path(), this won't change anything
+    
+    stride_cmd = f'--stride {stride}'
+
+    temperature_cmd = f'--temperature {temperature}'
+
+
+
+    #infiles_dir = Path(dir.joinpath('infiles'))
+    #infiles_dir.mkdir(parents=True, exist_ok=True)
+    if from_infiles == True:
+        ln_s_f(src_infiles_dir.joinpath('infile.ucposcar'), dir)
+        ln_s_f(src_infiles_dir.joinpath('infile.ssposcar'), dir)
+        ln_s_f(src_infiles_dir.joinpath('infile.meta'), dir)
+        ln_s_f(src_infiles_dir.joinpath('infile.stat'), dir)
+        ln_s_f(src_infiles_dir.joinpath('infile.positions'), dir)
+        ln_s_f(src_infiles_dir.joinpath('infile.forces'), dir)
+        unitcell = read(src_infiles_dir.joinpath('infile.ucposcar'), format='vasp')
+        supercell = read(src_infiles_dir.joinpath('infile.ssposcar'), format='vasp')
+    else:       
+        write(dir.joinpath('infile.ucposcar'), unitcell, format='vasp')
+        write(dir.joinpath('infile.ssposcar'), supercell, format='vasp')
+        make_stat(sampling, dir)
+        make_meta(sampling, dir, timestep=timestep, temp=100)
+        make_forces(sampling, dir)
+        make_positions(sampling, dir)
+
+    if polar == True:
+        ln_s_f(loto_filepath, dir.joinpath('infile.lotosplitting'))
+    
+    cmd = f'{bin_prefix} {tdep_bin_directory.joinpath("extract_forceconstants")} --firstorder {rc2_cmd} {temperature_cmd} {polar_cmd} {stride_cmd}'
+
+    ucells = [unitcell]
+    mat = np.round(supercell.get_cell() @ np.linalg.inv(unitcell.get_cell())) # rounding is necessary, otherwise astype will truncate
+    mat = mat.astype('int')
+    
+    print('Here are the parameters of the first-order optimization:')
+    print(f'\t2nd-order cutoff: ' +colored(f'{rc2} Angstroms', 'blue'))
+    print(f'\tTemperature: ' +colored(f'{temperature}', 'blue'))
+    if bin_prefix == '':
+        print(f'\tNo binary prefix')
+    else:
+        print(f'\tBinary prefix: ' +colored(f'{bin_prefix}', 'blue'))
+    if polar == True:
+        print('\tPolar correction (LO-TO): ' + colored('yes', 'blue'))
+    else:
+        print('\tPolar correction (LO-TO): ' + colored('no', 'blue'))
+    print(f'\tStride: ' +colored(f'{stride}', 'blue'))
+    print(f'\tMaximum number of iterations: ' +colored(f'{max_iterations_first_order}', 'blue'))
+    print(f'\tThreshold for the maximum difference in the positions between iterations: ' +colored(f'{displ_threshold_firstorder} Angstrom', 'blue'))
+    print(f'\tStarting reduced positions:')
+    for pos in unitcell.get_scaled_positions():
+        print(f'\t                   ' +colored(f'{pos[0]:.12f} {pos[1]:.12f} {pos[2]:.12f}', 'blue'))
+    print('\tMultiplicity matrix:')
+    print(f'\t                    ' +colored(f'{mat[0,0]} {mat[0,1]} {mat[0,2]}', 'blue'))
+    print(f'\t                    ' +colored(f'{mat[1,0]} {mat[1,1]} {mat[1,2]}', 'blue'))
+    print(f'\t                    ' +colored(f'{mat[2,0]} {mat[2,1]} {mat[2,2]}', 'blue'))
+    print(f'-- Starting with iterations --')
+    
+    logpath = dir.joinpath('log_ifc')
+    errpath = dir.joinpath('err_ifc')
+
+    for i in range(max_iterations_first_order):
+        print(f'# Iteration {i+1}:')
+        with open(logpath.absolute(), 'w') as log, open(errpath.absolute(), 'w') as err:
+            run(cmd.split(), cwd=dir.absolute(), stdout=log, stderr=err)
+        ucells.append(read(dir.joinpath('outfile.new_ucposcar'), format='vasp'))
+        converged, err, red_err = check_convergence_positions(dir, displ_threshold_firstorder)
+        dir.joinpath('infile.ucposcar').rename(dir.joinpath(f'infile.ucposcar_{i}')) # rename the ucell that's been used with the previous iteration number
+        move(dir.joinpath('outfile.new_ucposcar'), dir.joinpath('infile.ucposcar'))
+        new_unitcell = ucells[-1]
+        new_supercell = make_supercell(new_unitcell, mat)
+        dir.joinpath('infile.ssposcar').rename(dir.joinpath(f'infile.ssposcar_{i}'))
+        write(dir.joinpath('infile.ssposcar'), new_supercell, format='vasp')
+        dir.joinpath('outfile.new_ssposcar').unlink()
+
+        # now infile.ucposcar is the newly generated one
+        
+        print('\tNew reduced positions:')
+        for pos in new_unitcell.get_scaled_positions():
+            print(f'\t                   ' + colored(f'{pos[0]:.12f} {pos[1]:.12f} {pos[2]:.12f}', 'blue'))
+
+        print(f'\tMaximum difference in position: ' + colored(f'{err.max():.12f} Angstrom ({red_err.max():.12f} in reduced units)', 'blue'))
+        
+        # let's save the last unitcell and supercell as 'optimized' regardless of it being converged or not
+        ln_s_f(dir.joinpath(f'infile.ucposcar_{i+1}'), dir.joinpath('optimized_unitcell.poscar')) # create a sym link to the last unitcell
+        ln_s_f(dir.joinpath(f'infile.ssposcar_{i+1}'), dir.joinpath('optimized_supercell.poscar')) # create a sym link to the last supercell
+        if converged:
+            conv_unitcell = new_unitcell
+            conv_supercell = new_supercell 
+            dir.joinpath('infile.ucposcar').rename(dir.joinpath(f'infile.ucposcar_{i+1}')) # change the name of the converged infile consistently with the previous ones
+            dir.joinpath('infile.ssposcar').rename(dir.joinpath(f'infile.ssposcar_{i+1}'))
+            #print(f'renamed: infile.ucposcar to infile.ucposcar_{i+1}')
+            
+            print_gb(f'Convergence reached at iteration {i+1} ({err.max():.12f} < {displ_threshold_firstorder:.12f} Angstroms)!')
+            print(f'Final reduced positions:')
+            for pos in conv_unitcell.get_scaled_positions():
+                print(f'\t                   ' + colored(f'{pos[0]:.12f} {pos[1]:.12f} {pos[2]:.12f}', 'blue'))
+            print(f'Difference with respect to the previous iteration:')
+            for diff in red_err:
+                print(f'\t                    '+ colored(f'{diff[0]:.12f} {diff[1]:.12f} {diff[2]:.12f}', 'blue'))
+            print('The optimised unitcell is saved as ' + colored('optimized_unitcell.poscar', 'blue', attrs=['bold']) + '.')  
+            print('The optimised supercell is saved as ' + colored('optimized_supercell.poscar', 'blue', attrs=['bold']) + '.') 
+            print_kb('********* ' + colored('First-order TDEP optimization done!', 'green') + ' *********') 
+            break
+
+        if i == max_iterations_first_order - 1:
+            dir.joinpath('infile.ucposcar').rename(dir.joinpath(f'infile.ucposcar_{i+1}')) # change the name of the last infile consistently with the previous ones
+            dir.joinpath('infile.ssposcar').rename(dir.joinpath(f'infile.ssposcar_{i+1}')) 
+            print_r('ATTENTION! The maximum number of iterations was reached without convergence!')
+            print_r('The optimised unconverged unitcell is saved as ' + colored('optimized_unitcell.poscar', 'blue', attrs=['bold']) + '.')  
+            print_r('The optimised unconverged supercell is saved as ' + colored('optimized_supercell.poscar', 'blue', attrs=['bold']) + '.')
+            print_rb('******** First-order TDEP optimization failed! ********')
+
+    return new_unitcell, new_supercell, converged

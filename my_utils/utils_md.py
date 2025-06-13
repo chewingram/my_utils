@@ -740,14 +740,15 @@ def rdf(cell, pos, centers, coords, V=None, nbins=100, cutoff=None, clip_autocor
     cell_n = np.linalg.norm(cell, axis=1) # auxiliary variable with the lenghts of the axes
     
     ncenters = len(centers)
-    ncoords = np.array([len(x) for x in coords])
+    ncoords = np.array([len(x) for x in coords]) # len(coords) = len(centers), len(coords[i]) (= ncoords[i]) = n. of coords for center i
 
     if (ncoords == ncoords[0]).all():
 
         # do you want to understand the following expression? Go to the end of the function, then.
         D = np.linalg.norm(np.transpose(cell @ np.transpose(mic_sign(rpos[centers, None, :] - rpos[coords]), (0, -1, -2)), (0, -1, -2)), axis=2)
         #D = np.linalg.norm(mic(rpos[:, None, :] - rpos[coords]) @ cell, axis=2)
-        
+        # now D has shape (ncenters, ncoords) D[i,j] is the (scalar) distance between center i and its j-th coord, with mic applied. 
+
         # let's get the density
         rho = ncoords[0] / V # for each center, the number of coordinants is the same, so this formula holds for any center
     
@@ -763,7 +764,7 @@ def rdf(cell, pos, centers, coords, V=None, nbins=100, cutoff=None, clip_autocor
         binvs = (4/3) * np.pi * ((bincs + step/2)**3 - (bincs - step/2)**3)
     
         rdf_at = np.zeros((ncenters, len(bincs))) # initialize the rdf for all the centers
-        for i in range(D.shape[0]): # loop over the atoms
+        for i in range(D.shape[0]): # loop over the centers atoms
             # let's turn each element of the row into the respective nearest element in the bin centers
             indices = np.floor((np.extract(D[i]<cutoff, D[i]) - step/2) / step + 0.5).astype(int)
             approx = bincs[indices]
@@ -801,11 +802,12 @@ def rdf(cell, pos, centers, coords, V=None, nbins=100, cutoff=None, clip_autocor
             # bincs and cutoff that will be returned are those from the last iteration of the for loop
         
     # Before returning let's break down the hell broadcasting used to generate D
-    # Let's start by taking rpos[coords]: it has shape (ncenters, ncoords, 3) and for each center there is a row for each 
-    # coordinating atom (coord) and for each coord there are three reduced coordinates (hence a vector). 
+    # Let's start by taking rpos[coords] (note that the elems of coords have the same lenght, so they can be used by numpy to fancy-index): 
+    # it has shape (ncenters, ncoords, 3) and for each center there is a row for each coordinating atom (coord) and for each coord there 
+    # are three reduced coordinates (hence a vector). 
     # We need to subtract each vector associated to a single center to that center's rpos. So we take rpos[centers], which has shape
     # (ncenters,3) and subtract to it rpos[coords]. In terms of shapes: (ncenters,3) - (ncenters, ncoords, 3). Following the broadcasting
-    # rules of numpy, the last two dimensions are mapped between the two arrays, while for the third one (from right), a 1 
+    # rules of numpy, the last two dimensions are mapped between the two arrays, while for the third one (from right), 1 
     # is assumed for the first shape. The operation now would be: (1,ncenters,3) - (ncenters,ncoords,3). The dimensions do not correspond.
     # In order to solve this, we need to change the shape from (1, ncenters, 3) to (ncenters, 1, 3). This way, in the second dimension
     # the elements are duplicated as many times as needed to perform the subtraction. Namely, rpos[centers][i,j] = rpos[centers][i,j+1]...
@@ -994,6 +996,14 @@ def rdf_ase_elems(atoms,
                     
 
     def check_and_format_coord_value(value):
+        '''
+        Takes the value and check wether it is an int, a str or a list of int/str.
+        If the value is not mappable to an element or it is a list with at least one element non mappable,
+        chk will be set to 1 and returned; the function will only raise a warning and the specific unmappable        
+        value will be simply skipped.
+
+        Returns an array (possibly empty) of atomic numbers and chk.
+        '''
         chk = 0
         if isinstance(value, str):
             if value == 'all':
@@ -1007,6 +1017,13 @@ def rdf_ase_elems(atoms,
                     chk = 1
                 except:
                     raise ValueError('There is something wrong in coord_elements, please check it!')
+        elif isinstance(value, int):
+            if 0 < value <=118:
+                new_value = [value]
+            else:
+                new_value = []
+                print(f'WARNING: uknown element of atomic number {value}')
+                chk = 1
         elif isinstance(value, (list,np.ndarray)):
             new_value = []
             for item in value:
@@ -1014,11 +1031,13 @@ def rdf_ase_elems(atoms,
                     try:
                         new_value.append(ase_atnums[lc(item)])
                     except KeyError:
+                        print(f'WARNING: uknown element {value}')
                         chk = 1
                 elif isinstance(item, (int, np.int64)):
                     if  0 < item <= 118:
                         new_value.append(item)
                     else:
+                        print(f'WARNING: uknown element of atomic number {value}')
                         chk = 1
                 else:
                     raise TypeError('coord_elements must be a dictionary and its values must be lists|arrays of str or int!')
@@ -1034,6 +1053,8 @@ def rdf_ase_elems(atoms,
     if not isinstance(atoms, list):
         if isinstance(atoms, Atoms):
             atoms = [atoms]
+        else:
+            raise TypeError('atoms must be an (or a list of) ase.atoms.Atoms object(s)!')
     elif not all([isinstance(x, Atoms) for x in atoms]):
         raise TypeError('atoms must be an (or a list of) ase.atoms.Atoms object(s)!')
         
@@ -1047,7 +1068,8 @@ def rdf_ase_elems(atoms,
     
     # let's get a list of sets of the elements present in each structure
     atomic_numbers = [at.get_atomic_numbers() for at in atoms]
-    
+
+    # let's get the array common ATOMIC NUMBERS among the structures     
     common_elements = get_common_elements(atoms) # time consuming for long trajectories
 
         # check on center_elements
@@ -1070,7 +1092,7 @@ def rdf_ase_elems(atoms,
         else:
             raise TypeError('all entries of center_elements must be of the same type (either int -atomic numbers- or str -chemical symbol-!')
            
-        # we are sure now center_elements is a list|array and all elements are int
+        # we are sure now center_elements is a list|array and all elements are int (they are atomic numbers)
     center_elements = np.unique(center_elements)
     #print(center_elements, common_elements)
     if not all(np.in1d(center_elements, common_elements)):
@@ -1101,6 +1123,7 @@ def rdf_ase_elems(atoms,
     # We need to make sure only center_elements are among the keys
     len2 = len(coord_elements)
     [coord_elements.pop(key) for key in list(coord_elements.keys()) if key not in center_elements]
+    condition1 = len2 != len(copy_coord_elements.keys()) # True if after the checking coord_elements has lost some key
 
     # Now we need to check the values of the dictionary
     chks = []
@@ -1109,16 +1132,16 @@ def rdf_ase_elems(atoms,
         coord_elements[key], chk = check_and_format_coord_value(coord_elements[key])
         chks.append(chk)
 
-    condition1 = len2 != len(copy_coord_elements.keys())
+     
     condition2 = np.sum(chks) != 0
                                                    
     if condition1 and not condition2:
-        print('WARNING: some coord_elements entry\'s key could not be associated to any atom, so it was ignored.')
+        print('WARNING: some coord_elements entry\'s key could not be associated to any center atom, so it was ignored.')
         print(f'Given coord_elements:\n{copy_coord_elements}')
         print(f'Actual coord_elements:\n{coord_elements}')
 
     if condition1 and condition2:
-        print('WARNING: some coord_elements entry\'s key could not be associated to any atom, so it was ignored.')
+        print('WARNING: some coord_elements entry\'s key could not be associated to any center atom, so it was ignored.')
         print('Moreover, some coord_elements entry\'s value had one or more elements that could not be associated to any atom, so it/they was/were ignored too.')
         print(f'Given coord_elements:\n{copy_coord_elements}')
         print(f'Actual coord_elements:\n{coord_elements}')
@@ -1132,15 +1155,15 @@ def rdf_ase_elems(atoms,
 
     del chks, chk
 
-    # now center_elements is a list of unique centers (capitalized) and coord_elements is a dictionary with a list of capitalized
-    # elements for each center
+    # now center_elements is a list of unique centers (atomic number) and coord_elements is a dictionary with a list of atomic numbers (coordinants)
+    # for each center
 
     coll_RDFs = []
     coll_RDFs_tot = []
     coll_bincs = []
     coll_cutoff = []
     coll_rdf_at = []
-    for i, atomic_nums in enumerate(atomic_numbers):
+    for i, atomic_nums in enumerate(atomic_numbers): # len(atomic_numbers) = n. of structures
         
         centers = []
         pairs = []
@@ -1148,17 +1171,22 @@ def rdf_ase_elems(atoms,
 
         center_atoms = [] # indices of the center atoms 
         for center_element in center_elements:
-            to_extend1 = np.where(atomic_nums == center_element)[0]
+            to_extend1 = np.where(atomic_nums == center_element)[0] # np.where returns a tuple with an array in it: (array,) hence we need the indexing 
             center_atoms.extend(to_extend1)
             #centers.extend(to_extend1)
+        # now center_atoms is a list of indices, center_atoms[i] is the index of the i-th center atom (not center element, center ATOM)
 
         for j, center_atom in enumerate(center_atoms):
             curr_center_atom_atnum = atomic_nums[center_atom]
             curr_center_atom_coords = coord_elements[curr_center_atom_atnum]
+            # now curr_center_atom_coords is a np.array with the at.num. of the coords of the current center atom 
             for curr_center_atom_coord in curr_center_atom_coords:
+                # curr_center_atom_coord is a single int, atomic number of the current coordinant element of the current center atom
                 centers.append(center_atom)
-                curr_center_atom_coord_atoms = np.where(atomic_nums == curr_center_atom_coord)[0]
+                curr_center_atom_coord_atoms = np.where(atomic_nums == curr_center_atom_coord)[0] # np.where returns a tuple with an array in it: (array,) hence we need the indexing
+                # curr_center_atom_coord_atoms is an array with the indices in atomic_nums of the atoms with at. num. = curr_center_atom_coord 
                 pairs.append((curr_center_atom_atnum, curr_center_atom_coord, j, len(curr_center_atom_coord_atoms)))
+                # pairs[-1] is a tuple (at. num. of the current center atom, at. num. of its last coord. atom added, the index j, and how many coords. atoms of the last element added it has  
                 coords.append(curr_center_atom_coord_atoms)
     
         centers = np.array(centers)
@@ -1181,11 +1209,13 @@ def rdf_ase_elems(atoms,
         RDFs_tot = [] # order: center_elements
 
         N = np.array([x[3] for x in pairs]) # how many coords for each center_atom-related rdf
-        unique_center_atoms = set(center_atoms) # a list with the indices of the center atoms
+        unique_center_atoms = set(center_atoms) # a list with the indices of the center atoms (I don't think it's different from center_atoms)
         rdf_tot_at = []
         unique_center_names = [ase_chemsym[atomic_nums[unique_center_atom]] for unique_center_atom in unique_center_atoms]
+        # unique_center_names has the names of the center atoms (they can be repeated, even if it has "unique" in the name, idk why I chose that name) 
         for j, unique_center_atom in enumerate(unique_center_atoms):
             indices = np.array([j for j, center_atom in enumerate(center_atoms) if center_atom == unique_center_atom])
+            # `indices` contains the indices of occurences of the current unique_center_atom in center_atoms
             rdf_tot_at.append(np.average(rdf_at[indices], axis=0, weights=N[indices])) # we average all the rdf that whose center is 
                                                                                        # the unique_center_atom; the average is weighted by the
                                                                                        # number of coords of each rdf
@@ -1193,9 +1223,9 @@ def rdf_ase_elems(atoms,
         
         RDFs_tot_center_elems = []
         
-        for center_element in center_elements: # center elements = list of the elems used as centers
+        for center_element in center_elements: # center elements = list of the elems used as centers; at. nums.
             center_name = ase_chemsym[center_element]
-            for coord_element in coord_elements[center_element]: # scan its coords elems.
+            for coord_element in coord_elements[center_element]: # scan its coords elems., at. nums.
                 coord_name = ase_chemsym[coord_element]
                 curr_pair = (center_element, coord_element) # create the pair
                 elem_pairs.append(curr_pair)
@@ -1211,8 +1241,9 @@ def rdf_ase_elems(atoms,
             # total
             
             indices = [j for j, unique_center_name in enumerate(unique_center_names) if unique_center_name == center_name]
+            # indices contains the indices in unique_center_names of the centers atoms of element = center_name
             #return unique_center_names, center_name
-            RDFs_tot.append([(center_name), rdf_tot_at[indices].mean(axis=0)])
+            RDFs_tot.append([(center_name), rdf_tot_at[indices].mean(axis=0)]) # arithmetic average
 
         if plot == True:
             for RDF in RDFs:
@@ -1240,7 +1271,8 @@ def rdf_ase_elems(atoms,
                     fig_dir = Path(fig_dir)
                     if not fig_dir.is_dir():
                         fig_dir.mkdir(parents=True, exist_ok=True)
-                    plt.savefig(fig_dir.joinpath(f'{ce}_{i}.png'), format='png', bbox_inches='tight', dpi=fig_dpi)
+                plt.savefig(fig_dir.joinpath(f'{ce}_{i}.png'), format='png', bbox_inches='tight', dpi=fig_dpi)
+                plt.close()
 
         coll_RDFs.append(RDFs)
         coll_RDFs_tot.append(RDFs_tot)
