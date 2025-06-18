@@ -217,7 +217,7 @@ def run_md(ismpi = False,
         # file in which we can store all the configurations we got wit the MD along with their energy computes with the
         # calculator.
         else:
-            newtraj = reconstruct_mlmd_trajectory(workdir.joinpath('Trajectory/mlmd.traj').absolute(), workdir.joinpath('Trajectory/mlmd.log').absolute())[nthrow:]
+            newtraj = reconstruct_mlmd_trajectory(workdir.joinpath('Trajectory/mlmd.traj').absolute(), workdir.joinpath('Trajectory/mlmd.log').absolute())[nthrow+1:]
             write(wdir.joinpath(f'T{temperature}K.traj').absolute(), newtraj)
             #traj = reconstruct_mlmd_trajectory(f'{workdir}mlmd.traj', f'{workdir}mlmd.log')[nthrow:]
             #os.environ["ASE_LAMMPSRUN_COMMAND"] = f"{mpirun} -n {nproc} {lmp_bin.absolute()}"

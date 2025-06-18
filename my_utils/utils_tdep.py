@@ -1806,8 +1806,10 @@ def first_order_optimization(from_infiles=False,
 
     print_kb('**** First-order TDEP optimization of the unitcell ****')
     dir = Path(dir)
-    if not dir.is_dir():
-        dir.mkdir(parents=True, exist_ok=True)
+    if dir.is_dir():
+        shutil.rmtree(dir)
+    dir.mkdir(parents=True)
+
 
     if from_infiles == True:
         if infiles_dir is None:
@@ -1951,3 +1953,23 @@ def first_order_optimization(from_infiles=False,
             print_rb('******** First-order TDEP optimization failed! ********')
 
     return new_unitcell, new_supercell, converged
+
+
+
+def correct_spectralfunction(sp_path):
+    '''Correct the spectralfunction coming from TDEP `lineshape` binary
+    Return
+    '''
+    with h5py.File(sp_path) as file:
+        Delta = np.array(file['anharmonic']['real_threephonon_selfenergy'])[3:] # shape: nmodes, n_freqs
+        Delta_0 = Delta[:,0]
+        Gamma = np.array(file['anharmonic']['imaginary_threephonon_selfenergy'])[3:] # shape: nmodes, n_freqs
+        isotope = np.array(file['anharmonic']['imaginary_isotope_selfenergy'])[3:] # shape: nmodes, n_freqs
+        Gamma = Gamma + isotope
+        lns = np.array(file['anharmonic']['spectralfunction_per_mode'])[3:]       
+        probe_freqs = np.array(file['anharmonic']['frequency']) # shape: n_freqs
+        ph_freqs = np.array(file['harmonic']['harmonic_frequencies'])[3:] # shape: nmodes 
+    cs_numerator = 2 * ph_freqs[:,None] * Gamma * 2 * ph_freqs[:,None]/np.pi
+    cs_denominator = (probe_freqs[None,:]**2 - ph_freqs[:,None]**2 - 2 * ph_freqs[:,None] * (Delta-Delta_0[:,None]))**2 + 4 * ph_freqs[:,None]**2 * Gamma**2  
+    cs = cs_numerator / cs_denominator
+    return cs, probe_freqs      
