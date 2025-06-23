@@ -61,5 +61,5 @@ run_md(**run_args)
 
 
 traj_path = Path('./NPT/Trajectory/mlmd.traj')
-final_traj = read(traj_path, index='nthrow+1:')
+final_traj = read(traj_path, index=f'{nthrow+1}:')
 write(traj_path, final_traj)

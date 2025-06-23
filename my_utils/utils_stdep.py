@@ -774,8 +774,8 @@ def launch_stdep(root_dir: str = './',
                                                                     conv_criterion_diff = conv_criterion_diff)
         # let's update ucell and scell if first_order was done
         if first_order == True:
-            unitcell = read(ifc_dir.joinpath('conv_rc2/infiles/infile.ucposcar'), format='vasp')
-            supercell = read(ifc_dir.joinpath('conv_rc2/infiles/infile.ssposcar'), format='vasp')
+            unitcell = read(ifc_dir.joinpath('conv_rc2/infiles/infile.ucposcar'), format='vasp') # optimised unitcell
+            supercell = read(ifc_dir.joinpath('conv_rc2/infiles/infile.ssposcar'), format='vasp') # optimised supercell
         
         if converged == False:
             print_rb(f'For this sTDEP iteration, the IFC did not converge w.r.t. the rc2 values. However, the IFCs obtained with the biggest one ({conv_rc2} Angstroms) will be used.')

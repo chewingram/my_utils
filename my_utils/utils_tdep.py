@@ -1433,11 +1433,11 @@ def conv_rc2_extract_ifcs(unitcell = None,
         The rc2 cutoff to be used for the first-order optimization.
         If None, the maximum value in `rc2s` will be used.
     displ_threshold_firstorder : float
-        Convergence threshold for atomic displacements during first-order optimization (in Å).
+        Convergence threshold for atomic displacements during first-order optimization (in Ang).
     max_iterations_first_order : int
         Maximum number of iterations allowed in the first-order optimization.
     rc2s : list of float
-        List of second-order cutoff radii (in Å) to test for convergence.
+        List of second-order cutoff radii (in Ang) to test for convergence.
     polar : bool
         Whether to include LO-TO splitting (polar correction).
     loto_filepath : str or Path
@@ -1451,7 +1451,7 @@ def conv_rc2_extract_ifcs(unitcell = None,
     tdep_bin_directory : str or Path
         Path to the TDEP binaries.
     ifc_diff_threshold : float
-        Threshold (in eV/Å²) for convergence assessment.
+        Threshold (in eV/Ang^2) for convergence assessment.
     n_rc2_to_average : int
         Number of previous `rc2` IFCs to average over for convergence assessment.
     conv_criterion_diff : str
@@ -1806,9 +1806,9 @@ def first_order_optimization(from_infiles=False,
 
     print_kb('**** First-order TDEP optimization of the unitcell ****')
     dir = Path(dir)
-    if dir.is_dir():
+    if dir.is_dir() and not dir.resolve().absolute() == Path('./').resolve().absolute():
         shutil.rmtree(dir)
-    dir.mkdir(parents=True)
+    dir.mkdir(parents=True, exist_ok=True)
 
 
     if from_infiles == True:
