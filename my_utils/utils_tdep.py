@@ -1879,36 +1879,62 @@ def parse_outfile_forceconstants(filepath, unitcell, supercell):
     nats_u = len(unitcell)
 
     cell = unitcell.get_cell()
+    upositions_red = unitcell.get_scaled_positions()# reduced positions in the unit cell, in unit cell coord
+    upositions_red[np.abs(upositions_red) < 1E-10] = 0 
+    
     positions = supercell.get_positions() # nats, 3
-    positions_red = (np.linalg.inv(cell.T) @ positions.T).T
+    positions_red = (np.linalg.inv(cell.T) @ positions.T).T # in unit cell coord
+    positions_red[np.abs(positions_red) < 1E-10] = 0
     atoms_tuples = []
     for i, atom in enumerate(supercell):
         frac_part = positions_red[i] % 1 # works for both positive and negative reduced coords!!! e.g. -1.3 % 1 = 0.7, not -0.3
         ind = find_index_in_unitcell(frac_part, unitcell)
         repetition_indices = [np.floor(positions_red[i][0]).astype(int), np.floor(positions_red[i][1]).astype(int),np.floor(positions_red[i][2]).astype(int)] # again, works for positive and negative numbers, np.floor(-1.3) = -2, not -1!!
+       
         atoms_tuples.append((ind, *repetition_indices))
+        # if ind == 0:
+        #     print(i)
+        #     print(f'Ind in unitcell: {ind}')
+        #     print(atoms_tuples[-1])
+        #     print(f'pos: {positions_red[i]}')
+        
     # now atoms_tuples is a list of tuples (ind, R1, R2, R3), where ind the index of the atom in the unitcell and R1/2/3 are the component of the position of the repetition in reduced coordinates
+    
 
     ifc = np.zeros((nats_u, nats_s, 3, 3))
     k = 2
     for i in range(nats_u):
         nns = int(lines[k][0]) # number of neighbours
+        print(f'For atom {i+1} there are {nns} neighbs')
         for n in range(nns):
             ci = k+1+5*n
+            print(lines[ci+1])
             neigh_unit_ind = int(lines[ci][0])-1 # index of the neighbour in the unitcell
+            
+            # let's retrieve the vector of the repetition of the unitcell of the current neighbour in the unit cell (red) coords.
             vec_u = np.array([float(lines[ci+1][0]), float(lines[ci+1][1]), float(lines[ci+1][2])])
-            vec_u = np.round(vec_u).astype(int)
-            # we need to change the basis of vec from the unitcell vectors to the supercell vectors
+
+            # let's get the the vector of the the current neighbour in the unit cell (red) coords.
+            curr_pos_u = upositions_red[neigh_unit_ind] + vec_u 
+
+            # let's write curr_pos_u in the super cell (red) coords            
+            # we need to change the basis of from the unitcell vectors to the supercell vectors
             # x^u = L x^s where L is P.T, where P is the mat_mult used to create the supercell from the unitcell
             # in principle we can compute x^s = L^-1 @ x^u, but np.solve is faster
-            vec_s = np.linalg.solve(mat.T, vec_u)
-            vec_s[np.abs(vec_s) < 1E-10] = 0
-            vec_wrapped_s = vec_s % 1
-            vec_wrapped_u = mat @ vec_wrapped_s
-            vec_wrapped_u[np.abs(vec_wrapped_u) < 1E-10] = 0
-            vec_wrapped_u = np.round(vec_wrapped_u).astype(int)
+            
+            curr_pos_s = np.linalg.solve(mat.T, curr_pos_u) # position of the current neighbour in the super cell (red) coords.
+            curr_pos_s[np.abs(curr_pos_s) < 1E-10] = 0 # clean
+            
+            # let's wrap it inside the supercell
+            curr_pos_s_wrapped = curr_pos_s % 1 
 
-            current_tuple = (neigh_unit_ind, vec_wrapped_u[0], vec_wrapped_u[1], vec_wrapped_u[2])
+            # now let's put it back to the unit cell (red) coords.
+            curr_pos_u_wrapped = np.linalg.solve(np.linalg.inv(mat.T), curr_pos_s_wrapped)
+
+            # let's write the vector of the repetition of the unitcell of the current neighbour in the unit cell (red) coords. after the wrapping
+            curr_repetition_indices = [np.floor(curr_pos_u_wrapped[0]).astype(int), np.floor(curr_pos_u_wrapped[1]).astype(int),np.floor(curr_pos_u_wrapped[2]).astype(int)] 
+            
+            current_tuple = (neigh_unit_ind, curr_repetition_indices[0], curr_repetition_indices[1], curr_repetition_indices[2])
             j = atoms_tuples.index(current_tuple) # find the matching tuple, j is the index of the neighbour in the supercell
             tens = []
             tens.append([float(lines[ci+2][0]), float(lines[ci+2][1]), float(lines[ci+2][2])])
@@ -1916,10 +1942,10 @@ def parse_outfile_forceconstants(filepath, unitcell, supercell):
             tens.append([float(lines[ci+4][0]), float(lines[ci+4][1]), float(lines[ci+4][2])])
             tens = np.array(tens, dtype='float')
             ifc[i,j] += tens
+            print(current_tuple)
         k += 1+5*nns
 
     return ifc # shape n_atoms_unitcell, n_atoms_supercell, 3, 3
-
 
 def run_phonons(dir, ucell, scell, ifc_file, qgrid=32, tdep_bin_directory=None, bin_pref='', dos=False, units='thz'):
     write(dir.joinpath('infile.ucposcar'), ucell, format='vasp')
