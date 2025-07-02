@@ -1892,11 +1892,6 @@ def parse_outfile_forceconstants(filepath, unitcell, supercell):
         repetition_indices = [np.floor(positions_red[i][0]).astype(int), np.floor(positions_red[i][1]).astype(int),np.floor(positions_red[i][2]).astype(int)] # again, works for positive and negative numbers, np.floor(-1.3) = -2, not -1!!
        
         atoms_tuples.append((ind, *repetition_indices))
-        # if ind == 0:
-        #     print(i)
-        #     print(f'Ind in unitcell: {ind}')
-        #     print(atoms_tuples[-1])
-        #     print(f'pos: {positions_red[i]}')
         
     # now atoms_tuples is a list of tuples (ind, R1, R2, R3), where ind the index of the atom in the unitcell and R1/2/3 are the component of the position of the repetition in reduced coordinates
     
@@ -1905,10 +1900,8 @@ def parse_outfile_forceconstants(filepath, unitcell, supercell):
     k = 2
     for i in range(nats_u):
         nns = int(lines[k][0]) # number of neighbours
-        print(f'For atom {i+1} there are {nns} neighbs')
         for n in range(nns):
             ci = k+1+5*n
-            print(lines[ci+1])
             neigh_unit_ind = int(lines[ci][0])-1 # index of the neighbour in the unitcell
             
             # let's retrieve the vector of the repetition of the unitcell of the current neighbour in the unit cell (red) coords.
@@ -1942,7 +1935,6 @@ def parse_outfile_forceconstants(filepath, unitcell, supercell):
             tens.append([float(lines[ci+4][0]), float(lines[ci+4][1]), float(lines[ci+4][2])])
             tens = np.array(tens, dtype='float')
             ifc[i,j] += tens
-            print(current_tuple)
         k += 1+5*nns
 
     return ifc # shape n_atoms_unitcell, n_atoms_supercell, 3, 3
