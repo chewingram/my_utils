@@ -4,6 +4,7 @@ import argparse
 from copy import deepcopy as cp
 from pathlib import Path
 import sys
+import pickle as pkl
 
 import numpy as np
 
@@ -1354,3 +1355,116 @@ def rdf_ase_elems(atoms,
 
 def ang_rdf(struct):
     elems = [struct.get_atomic_symbols()]
+
+
+def extract_npt_cells(n_inst, temps):
+    cells = []
+
+    for T in temps:
+        t_dir = Path(f'T{T}K')
+        iter_dirs = [t_dir.joinpath(f'NPT/{k}_instance') for k in range(n_inst)]
+        traj_paths = [x.joinpath('NPT/Trajectory/mlmd.traj') for x in iter_dirs][:]
+        cells.append(np.array([np.array([y.get_cell() for y in read(x, index=':')]) for x in traj_paths]))
+
+    cells = np.array(cells) # shape: n_temps, n_instances, n_timesteps, 3, 3
+    with open('NPT_cells.pkl', 'rb') as fl:
+        expl = 'Explanation variable. The second element of this file is the array of cells with shape (n_temps, n_instances, n_timesteps, 3, 3)'
+        pkl.dump([expl, cells])
+
+def conv_npt_cells(mult_mat=None, nfolds=10, n_to_average=4, figdir=None):
+    if mult_mat is None:
+        mult_mat = np.eye(3)
+
+    if figdir is None:
+        figdir = Path('./MD_convergence_figures')
+    figdir.mkdir(parents=True, exist_ok=True)
+
+
+    with open('NPT_cells.pkl', 'rb') as fl:
+        cells = pkl.load(fl)[1] 
+
+    cells = np.linalg.inv(mult_mat)[np.newaxis, np.newaxis, np.newaxis,:] @ cells
+
+
+    therm_cells = np.mean(cells, axis=2) # shape: n_temps, n_instances, 3, 3
+    therm_norms = np.linalg.norm(therm_cells, axis=3) # shape: n_temps, n_instances, 3
+    therm_norms = np.transpose(therm_norms, axes=(1,0,2)) # shape: n_instances, n_temps, 3
+    n_inst = therm_norms.shape[0]
+    avg_norms = []
+    for i_f in range(nfolds):
+        np.random.shuffle(therm_norms) # shuffles along the instance axis
+        avg_norm = [np.mean(therm_norms[:i], axis=0) for i in range(1, n_inst+1)] # shape: n_instances, n_temps, 3
+        avg_norms.append(avg_norm)
+    avg_norms = np.array(avg_norms) # shape: n_folds, n_instances, n_temps, 3
+
+
+    avg_norms = np.transpose(avg_norms, axes=(2,0,1,3))
+    aps = avg_norms[:,:,:,0] # shape: n_temps, n_folds, n_instances
+    cps = avg_norms[:,:,:,2] # shape: n_temps, n_folds, n_instances
+
+    avg_aps = np.mean(aps, axis=1) # shape: n_temps, n_instances
+    avg_cps = np.mean(cps, axis=1) # shape: n_temps, n_instances
+
+    k = n_to_average
+    avg_aps_d = []
+    avg_cps_d = []
+    for j in range(k, avg_aps.shape[1]):
+        avg_aps_d.append(np.absolute(avg_aps[:,j,np.newaxis] - avg_aps[:,j-k:j]).mean(axis=1))
+        avg_cps_d.append(np.absolute(avg_cps[:,j,np.newaxis] - avg_cps[:,j-k:j]).mean(axis=1))
+        
+    avg_aps_d = np.array(avg_aps_d) # shape: n_instances, n_temps
+    avg_cps_d = np.array(avg_cps_d) # shape: n_instance, n_temps
+
+    avg_aps_d = np.transpose(avg_aps_d, axes=(1,0)) # shape: n_temps, n_instances
+    avg_cps_d = np.transpose(avg_cps_d, axes=(1,0)) # shape: n_temps, n_instances
+
+
+    # avg_aps_d = avg_aps[:,1:] - avg_aps[:,:-1] # shape: n_temps, n_instances-1
+    # avg_cps_d = avg_cps[:,1:] - avg_cps[:,:-1] # shape: n_temps, n_instances-1
+
+    for i, T in enumerate(range(100, 800, 100)):
+        Fig = plt.figure(figsize=(15,7))
+        Fig.add_subplot(2,2,1)
+        plt.plot(range(1,n_inst+1), avg_aps[i], '.')
+        #plt.ylim(0.008+12.64)
+        plt.xlabel('Instances')
+        plt.ylabel('Lattice parameter a ($\mathrm{\AA}$)')
+        plt.title('Average lattice parameters a vs. number of instances')
+        #plt.axhline(y=avg_aps[i][-1], color='#888888', linestyle='-')
+        
+        Fig.add_subplot(2,2,2)
+        plt.plot(range(1,n_inst+1), avg_cps[i], '.')
+        #plt.ylim(36.9)
+        plt.xlabel('Instances')
+        plt.ylabel('Lattice parameter c ($\mathrm{\AA}$)')
+        plt.title('Average lattice parameters c vs. number of instances')
+        #plt.axhline(y=avg_cps[i][-1], color='#888888', linestyle='-')
+
+        bbox=dict(facecolor='yellow', alpha=0.5)
+        
+        Fig.add_subplot(2,2,3)
+        plt.plot(range(k+1,n_inst+1), avg_aps_d[i], '.')
+        #plt.ylim(36.9)
+        plt.xlabel('Instances')
+        plt.ylabel('Average $\Delta$ lattice parameter c ($\mathrm{\AA}$)')
+        plt.axhline(y=avg_aps_d[i][-1], color='#888888', linestyle='-')
+        txt = f'{avg_aps_d[i][-1]:5E}'
+        plt.text(n_inst+1-20,avg_aps_d[i][-1], txt, bbox=bbox)
+
+        
+        Fig.add_subplot(2,2,4)
+        plt.plot(range(k+1,n_inst+1), avg_cps_d[i], '.')
+        #plt.ylim(36.9)
+        plt.xlabel('Instances')
+        plt.ylabel('Average $\Delta$ lattice parameter c ($\mathrm{\AA}$)')
+        plt.axhline(y=avg_cps_d[i][-1], color='#888888', linestyle='-')
+        txt = f'{avg_cps_d[i][-1]:5E}'
+        plt.text(n_inst+1-20,avg_cps_d[i][-1], txt, bbox=bbox)
+
+        
+        
+        plt.suptitle(f'T={T} K')
+        plt.savefig(fname=figdir.joinpath(f'T{T}K.png'), format='png', bbox_inches='tight', dpi=600)
+
+
+
