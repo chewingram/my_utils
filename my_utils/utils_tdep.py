@@ -1058,7 +1058,127 @@ def write_lotofile(inpath, outpath='./infile.lotosplitting'):
     with open(outpath.absolute(), 'w') as fl:
         fl.write(txt)
 
-def convergence_tdep_mdlen(
+def convergence_tdep_mdlen(temperature,
+                           root_dir='./',
+                           tdep_bin_directory = Path(g_tdep_bin_directory),
+                           bin_prefix = 1,
+                           first_order = True,
+                           displ_threshold_firstorder = 0.0001,
+                           max_iterations_first_order = 20,
+                           nthrow = 0,
+                           rc2 = 10,
+                           rc3 = 5,
+                           ts = 1,
+                           size_step=10,
+                           max_stride=100,
+                           stride_step=8,
+                           uc_path = 'unitcell.json',
+                           mult_mat = [[1,0,0],[0,1,0],[0,0,1]],
+                           traj_path = './Trajectory.traj',
+                           polar = False,
+                           loto_filepath = None,
+                           job=False,
+                           job_template=None):
+    
+    
+    template = Path(__file__).parent.joinpath('data/conv_tdep/Run_tdep_template.py')
+    with open(template, 'r') as fl:
+        lines = fl.readlines()
+
+    index_wdir = None
+    index_index = None
+    
+    for i in range(28):
+        if '$wdir$' in lines[i]:
+            index_wdir = i # just to note where the wdir line is in the file
+        elif '$tdep_bin_directory$' in lines[i]:
+            lines[i] = f"tdep_bin_directory = '{tdep_bin_directory.absolute()}'"
+        elif '$bin_prefix$' in lines[i]:
+            lines[i] = f'bin_prefix = \'{bin_prefix}\''
+        elif '$nthrow$' in lines[i]:
+            lines[i] = f'nthrow = {nthrow}'
+        elif '$rc2$' in lines[i]:
+            lines[i] = f'rc2 = {rc2}'
+        elif '$rc3$' in lines[i]:
+            lines[i] = f'rc3 = {rc3}'
+        elif '$ts$' in lines[i]:
+            lines[i] = f'ts = {ts}'
+        elif '$traj_path$' in lines[i]:
+            lines[i] = f"traj_path = '{traj_path.absolute()}'"
+        elif '$uc_path$' in lines[i]:
+            lines[i] = f"uc_path = '{uc_path.absolute()}'"
+        elif '$mult_mat$' in lines[i]:
+            lines[i] = f'mult_mat = [[{mult_mat[0][0]}, {mult_mat[0][1]}, {mult_mat[0][2]}], '
+            lines[i] += f'[{mult_mat[1][0]}, {mult_mat[1][1]}, {mult_mat[1][2]}], '
+            lines[i] += f'[{mult_mat[2][0]}, {mult_mat[2][1]}, {mult_mat[2][2]}]]'
+        elif '$temperature$' in lines[i]:
+            lines[i] = f'temperature = {temperature}'
+        elif '$index$' in lines[i]:
+            index_index = i # just to note where the index line is in the file
+        elif '$polar$' in lines[i]:
+            lines[i] = f'polar = {polar}'
+        elif '$loto_filepath$' in lines[i]:
+            lines[i] = f'loto_filepath = {loto_filepath}'
+        elif '$first_order$' in lines[i]:
+            lines[i] = f'first_order = {first_order}'
+        elif '$displ_threshold_firstorder$' in lines[i]:
+            lines[i] = f'displ_threshold_firstorder = {displ_threshold_firstorder}'
+        elif '$max_iterations_first_order$' in lines[i]:
+            lines[i] = f'max_iterations_first_order = {max_iterations_first_order}'
+        elif '$stride$' in lines[i]:
+            index_stride = i # just to note where the stride line is in the file
+        else:
+            continue
+        lines[i] += '\n'
+
+    root_dir = Path(root_dir)
+    root_dir.mkdir(parents=True, exist_ok=True)
+
+    conv_dir = root_dir.joinpath('Convergence_tdep')
+    conv_dir.mkdir(parents=True, exist_ok=True)
+    
+    ats = read(traj_path, index=':')
+    nconfs = len(ats)
+    if nconfs < size_step:
+        raise ValueError('nstep must be < than the number of confs in the trajectory file!')
+    indices = [size_step*i for i in range(1, ceil(nconfs/size_step)+1)]
+
+    # deal with the sizes and minimum stride (=1)
+    sizes_dir = conv_dir.joinpath('sampling_size')
+    sizes_dir.mkdir(parents=True, exist_ok=True)
+    for index in indices:
+        inst_dir = sizes_dir.joinpath(f'{index}_size')
+        inst_dir.mkdir(parents=True, exist_ok=True)
+        lines[index_index] = f"index = {index}\n"
+        lines[index_wdir] = f"wdir = '{inst_dir.absolute()}'\n"
+        lines[index_stride] = f"stride = 1\n"
+        with open(inst_dir.joinpath('RunTdep.py'), 'w') as fl:
+            fl.writelines(lines)
+        if job == True:
+            shutil.copy(Path(job_template).absolute(), inst_dir)
+            #run(f'sbatch {Path(job_template).name}', cwd=inst_dir, shell=True)
+    
+    # deal with the strides and maximum size
+    strides_dir = conv_dir.joinpath('strides')
+    strides_dir.mkdir(parents=True, exist_ok=True)
+    strides = [x for x in range(1, max_stride, stride_step)]
+    for stride in strides:
+        inst_dir = strides_dir.joinpath(f'{stride}_stride')
+        inst_dir.mkdir(parents=True, exist_ok=True)
+        lines[index_index] = f"index = {indices[-1]}\n"
+        lines[index_wdir] = f"wdir = '{inst_dir.absolute()}'\n"
+        lines[index_stride] = f"stride = {stride}\n"
+        with open(inst_dir.joinpath('RunTdep.py'), 'w') as fl:
+            fl.writelines(lines)
+        if job == True:
+            shutil.copy(Path(job_template).absolute(), inst_dir)
+            #run(f'sbatch {Path(job_template).name}', cwd=inst_dir, shell=True)
+
+
+
+
+
+def old_convergence_tdep_mdlen(
         temperature,
         root_dir='./',
         folderbin = Path(g_tdep_bin_directory),
@@ -1732,7 +1852,7 @@ def conv_rc3_extract_ifcs(unitcell = None,
     if conv_criterion_diff not in ['avg', 'max']:
         raise ValueError('conv_criterion_diff must be either \'avg\' or \'max\'!')
     
-    if len(rc3s) <= n_rc2_to_average:
+    if len(rc3s) <= n_rc3_to_average:
         raise ValueError(f'You asked to assess the convergence by averaging the last {n_rc3_to_average} extractions, but you provided less than {n_rc3_to_average} + 1 values of rc3!')
     
     if first_order == True:
@@ -1835,7 +1955,7 @@ def conv_rc3_extract_ifcs(unitcell = None,
     # let's save the ifcs somewhere, so that they can be analyzed in the future
     expl = 'This pickle file contains the results of the convergence of IFCs w.r.t. rc3. There are three variables:\n1. this explanatory variabe\n'
     expl += '2. the list ifcs of shape (n_rc3s,natoms_unit, natoms_super, 3, 3) in eV/Angst^2\n3. the list of rc3s.'
-    results = [expl, ifcs, rc3s[:i_rc2+1]]
+    results = [expl, ifcs, rc3s[:i_rc3+1]]
     with open(dir.joinpath('conv_rc3_results.pkl'), 'wb') as fl:
         pkl.dump(results, fl)
     
@@ -1846,13 +1966,13 @@ def conv_rc3_extract_ifcs(unitcell = None,
 
     Fig = plt.figure(figsize=(15,4))
     Fig.add_subplot(1,2,1)
-    plt.plot(rc3s[1:i_rc2+1], max_diffs, '.')
+    plt.plot(rc3s[1:i_rc3+1], max_diffs, '.')
     plt.title('IFC convergence: max abs. error')
     plt.ylabel('Error on the IFCs (eV/$\mathrm{\AA}^2$)')
     plt.xlabel('rc3 ($\mathrm{\AA}$)')
     
     Fig.add_subplot(1,2,2)
-    plt.plot(rc3s[1:i_rc2+1], avg_diffs, '.')
+    plt.plot(rc3s[1:i_rc3+1], avg_diffs, '.')
     plt.title('IFC convergence: avg abs. error')
     plt.ylabel('Error on the IFCs (eV/$\mathrm{\AA}^2$)')
     plt.xlabel('rc3 ($\mathrm{\AA}$)')
