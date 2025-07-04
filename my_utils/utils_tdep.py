@@ -1058,27 +1058,124 @@ def write_lotofile(inpath, outpath='./infile.lotosplitting'):
     with open(outpath.absolute(), 'w') as fl:
         fl.write(txt)
 
-def convergence_tdep_mdlen(temperature,
-                           root_dir='./',
-                           tdep_bin_directory = Path(g_tdep_bin_directory),
-                           bin_prefix = 1,
-                           first_order = True,
-                           displ_threshold_firstorder = 0.0001,
-                           max_iterations_first_order = 20,
-                           nthrow = 0,
-                           rc2 = 10,
-                           rc3 = 5,
-                           ts = 1,
-                           size_step=10,
-                           max_stride=100,
-                           stride_step=8,
-                           uc_path = 'unitcell.json',
-                           mult_mat = [[1,0,0],[0,1,0],[0,0,1]],
-                           traj_path = './Trajectory.traj',
-                           polar = False,
-                           loto_filepath = None,
-                           job=False,
-                           job_template=None):
+def convergence_tdep_stride(stride=True,
+                            sampling_size=False,
+                            temperature=0,
+                            root_dir='./',
+                            tdep_bin_directory = Path(g_tdep_bin_directory),
+                            bin_prefix = 1,
+                            first_order = True,
+                            displ_threshold_firstorder = 0.0001,
+                            max_iterations_first_order = 20,
+                            nthrow = 0,
+                            rc2 = 10,
+                            rc3 = 5,
+                            ts = 1,
+                            max_stride=None,
+                            stride_step=None,
+                            uc_path = 'unitcell.json',
+                            mult_mat = [[1,0,0],[0,1,0],[0,0,1]],
+                            traj_path = './Trajectory.traj',
+                            polar = False,
+                            loto_filepath = None,
+                            job=False,
+                            job_template=None):
+
+    # take all the parameters at once
+    parameters = locals().copy # dictionary
+
+    parameters['stride'] = True
+    parameters['sampling_size'] = False
+
+    convergence_tdep_stride_or_sampling_size(**parameters)
+
+def convergence_tdep_sampling_size(stride=True,
+                                   sampling_size=False,
+                                   temperature=0,
+                                   root_dir='./',
+                                   tdep_bin_directory = Path(g_tdep_bin_directory),
+                                   bin_prefix = 1,
+                                   first_order = True,
+                                   displ_threshold_firstorder = 0.0001,
+                                   max_iterations_first_order = 20,
+                                   nthrow = 0,
+                                   rc2 = 10,
+                                   rc3 = 5,
+                                   ts = 1,
+                                   size_step=None
+                                   stride_for_size_conv=1,
+                                   uc_path = 'unitcell.json',
+                                   mult_mat = [[1,0,0],[0,1,0],[0,0,1]],
+                                   traj_path = './Trajectory.traj',
+                                   polar = False,
+                                   loto_filepath = None,
+                                   job=False,
+                                   job_template=None):
+
+    # take all the parameters at once
+    parameters = locals().copy # dictionary
+
+    parameters['stride'] = False
+    parameters['sampling_size'] = True
+
+    convergence_tdep_stride_or_sampling_size(**parameters)
+
+def convergence_tdep_stride_and_sampling_size(temperature=0,
+                                              root_dir='./',
+                                              tdep_bin_directory = Path(g_tdep_bin_directory),
+                                              bin_prefix = 1,
+                                              first_order = True,
+                                              displ_threshold_firstorder = 0.0001,
+                                              max_iterations_first_order = 20,
+                                              nthrow = 0,
+                                              rc2 = 10,
+                                              rc3 = 5,
+                                              ts = 1,
+                                              size_step=None,
+                                              stride_for_size_conv=1,
+                                              max_stride=None,
+                                              stride_step=None,
+                                              uc_path = 'unitcell.json',
+                                              mult_mat = [[1,0,0],[0,1,0],[0,0,1]],
+                                              traj_path = './Trajectory.traj',
+                                              polar = False,
+                                              loto_filepath = None,
+                                              job=False,
+                                              job_template=None):
+    
+    # take all the parameters at once
+    parameters = locals().copy # dictionary
+
+    parameters['stride'] = True
+    parameters['sampling_size'] = True
+
+    convergence_tdep_stride_or_sampling_size(**parameters)
+    
+
+def convergence_tdep_stride_or_sampling_size(stride=True,
+                                             sampling_size=True,
+                                             temperature=0,
+                                             root_dir='./',
+                                             tdep_bin_directory = Path(g_tdep_bin_directory),
+                                             bin_prefix = 1,
+                                             first_order = True,
+                                             displ_threshold_firstorder = 0.0001,
+                                             max_iterations_first_order = 20,
+                                             nthrow = 0,
+                                             rc2 = 10,
+                                             rc3 = 5,
+                                             ts = 1,
+                                             size_step=None,
+                                             stride_for_size_conv=1,
+                                             max_stride=None,
+                                             stride_step=None,
+                                             uc_path = 'unitcell.json',
+                                             mult_mat = [[1,0,0],[0,1,0],[0,0,1]],
+                                             traj_path = './Trajectory.traj',
+                                             polar = False,
+                                             loto_filepath = None,
+                                             job=False,
+                                             job_template=None):
     
     
     template = Path(__file__).parent.joinpath('data/conv_tdep/Run_tdep_template.py')
@@ -1139,40 +1236,52 @@ def convergence_tdep_mdlen(temperature,
     
     ats = read(traj_path, index=':')
     nconfs = len(ats)
-    if nconfs < size_step:
-        raise ValueError('nstep must be < than the number of confs in the trajectory file!')
-    indices = [size_step*i for i in range(1, ceil(nconfs/size_step)+1)]
 
-    # deal with the sizes and minimum stride (=1)
-    sizes_dir = conv_dir.joinpath('sampling_size')
-    sizes_dir.mkdir(parents=True, exist_ok=True)
-    for index in indices:
-        inst_dir = sizes_dir.joinpath(f'{index}_size')
-        inst_dir.mkdir(parents=True, exist_ok=True)
-        lines[index_index] = f"index = {index}\n"
-        lines[index_wdir] = f"wdir = '{inst_dir.absolute()}'\n"
-        lines[index_stride] = f"stride = 1\n"
-        with open(inst_dir.joinpath('RunTdep.py'), 'w') as fl:
-            fl.writelines(lines)
-        if job == True:
-            shutil.copy(Path(job_template).absolute(), inst_dir)
-            #run(f'sbatch {Path(job_template).name}', cwd=inst_dir, shell=True)
-    
-    # deal with the strides and maximum size
-    strides_dir = conv_dir.joinpath('strides')
-    strides_dir.mkdir(parents=True, exist_ok=True)
-    strides = [x for x in range(1, max_stride, stride_step)]
-    for stride in strides:
-        inst_dir = strides_dir.joinpath(f'{stride}_stride')
-        inst_dir.mkdir(parents=True, exist_ok=True)
-        lines[index_index] = f"index = {indices[-1]}\n"
-        lines[index_wdir] = f"wdir = '{inst_dir.absolute()}'\n"
-        lines[index_stride] = f"stride = {stride}\n"
-        with open(inst_dir.joinpath('RunTdep.py'), 'w') as fl:
-            fl.writelines(lines)
-        if job == True:
-            shutil.copy(Path(job_template).absolute(), inst_dir)
-            #run(f'sbatch {Path(job_template).name}', cwd=inst_dir, shell=True)
+    if sampling_size == True:
+        # deal with the sizes
+        if size_step is None:
+            raise ValueError('sampling_size is True, but you did not provide size_step!')
+        if (nconfs-nthrow) < size_step:
+            raise ValueError('size_step must be < than the number of confs in the trajectory file!')
+        sizes_dir = conv_dir.joinpath('sampling_size')
+        sizes_dir.mkdir(parents=True, exist_ok=True)
+        indices = [size_step*i for i in range(1, ceil((nconfs-nthrow)/size_step)+1)]
+        for index in indices:
+            inst_dir = sizes_dir.joinpath(f'{index}_size')
+            inst_dir.mkdir(parents=True, exist_ok=True)
+            lines[index_index] = f"index = {index}\n"
+            lines[index_wdir] = f"wdir = '{inst_dir.absolute()}'\n"
+            lines[index_stride] = f"stride = {stride_for_size_conv}\n"
+            with open(inst_dir.joinpath('RunTdep.py'), 'w') as fl:
+                fl.writelines(lines)
+            if job == True:
+                shutil.copy(Path(job_template).absolute(), inst_dir)
+                run(f'sbatch {Path(job_template).name}', cwd=inst_dir, shell=True)
+
+    if stride == True:
+        if max_stride is None:
+            raise ValueError('stride is True, but you did not provide max_stride!')
+        if stride_step is None:
+            raise ValueError('stride is True, but you did not provide stride_step!')
+
+        # deal with the strides
+
+        strides_dir = conv_dir.joinpath('strides')
+        strides_dir.mkdir(parents=True, exist_ok=True)
+        stridden_nconfs = ceil((nconfs-nthrow) / max_stride) # the number of confs after applying the stride for all stride values 
+        strides = [x for x in range(1, max_stride, stride_step)]
+        for stride in strides:
+            nconfs_for_stride = stridden_nconfs * stride
+            inst_dir = strides_dir.joinpath(f'{stride}_stride')
+            inst_dir.mkdir(parents=True, exist_ok=True)
+            lines[index_index] = f"index = {nconfs_for_stride}\n"
+            lines[index_wdir] = f"wdir = '{inst_dir.absolute()}'\n"
+            lines[index_stride] = f"stride = {stride}\n"
+            with open(inst_dir.joinpath('RunTdep.py'), 'w') as fl:
+                fl.writelines(lines)
+            if job == True:
+                shutil.copy(Path(job_template).absolute(), inst_dir)
+                run(f'sbatch {Path(job_template).name}', cwd=inst_dir, shell=True)
 
 
 

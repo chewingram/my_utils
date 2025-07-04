@@ -1,5 +1,6 @@
 import numpy as np
 from pathlib import Path
+import random
 
 from ase.io import read, write
 from ase.build import make_supercell
@@ -33,7 +34,9 @@ uc = read(uc_path)
 
 sc = make_supercell(uc, mult_mat)
 
-traj = read(traj_path, index=':')[nthrow:index]
+traj = read(traj_path, index=f'{nthrow}:')
+random.shuffle(traj)
+traj = read(traj_path, index=':')[:index:stride]
 
 # TDEP
 
