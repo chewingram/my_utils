@@ -1102,7 +1102,7 @@ def convergence_tdep_sampling_size(stride=True,
                                    rc2 = 10,
                                    rc3 = 5,
                                    ts = 1,
-                                   size_step=None
+                                   size_step=None,
                                    stride_for_size_conv=1,
                                    uc_path = 'unitcell.json',
                                    mult_mat = [[1,0,0],[0,1,0],[0,0,1]],
@@ -1215,7 +1215,7 @@ def convergence_tdep_stride_or_sampling_size(stride=True,
         elif '$polar$' in lines[i]:
             lines[i] = f'polar = {polar}'
         elif '$loto_filepath$' in lines[i]:
-            lines[i] = f'loto_filepath = {loto_filepath}'
+            lines[i] = f'loto_filepath = {Path(loto_filepath.absolute())}'
         elif '$first_order$' in lines[i]:
             lines[i] = f'first_order = {first_order}'
         elif '$displ_threshold_firstorder$' in lines[i]:
@@ -1243,13 +1243,18 @@ def convergence_tdep_stride_or_sampling_size(stride=True,
             raise ValueError('sampling_size is True, but you did not provide size_step!')
         if (nconfs-nthrow) < size_step:
             raise ValueError('size_step must be < than the number of confs in the trajectory file!')
+        if stride_for_size_conv is None:
+            raise ValueError('sampling_size is True, but you did not provide stride_for_size_conv!')
         sizes_dir = conv_dir.joinpath('sampling_size')
         sizes_dir.mkdir(parents=True, exist_ok=True)
+        # find sizes (aka indices) to converge w.r.t.
         indices = [size_step*i for i in range(1, ceil((nconfs-nthrow)/size_step)+1)]
+        # apply stride to indices
+        indices = [ceil(size/stride_for_size_conv) for size in indices]
         for index in indices:
             inst_dir = sizes_dir.joinpath(f'{index}_size')
             inst_dir.mkdir(parents=True, exist_ok=True)
-            lines[index_index] = f"index = {index}\n"
+            lines[index_index] = f"index = {ceil(index/stride_for_size_conv)}\n"
             lines[index_wdir] = f"wdir = '{inst_dir.absolute()}'\n"
             lines[index_stride] = f"stride = {stride_for_size_conv}\n"
             with open(inst_dir.joinpath('RunTdep.py'), 'w') as fl:
@@ -1268,13 +1273,14 @@ def convergence_tdep_stride_or_sampling_size(stride=True,
 
         strides_dir = conv_dir.joinpath('strides')
         strides_dir.mkdir(parents=True, exist_ok=True)
+        strides = [x for x in range(1, max_stride+1, stride_step)]
+        max_stride = max(strides) # actual max stride after rounding 
         stridden_nconfs = ceil((nconfs-nthrow) / max_stride) # the number of confs after applying the stride for all stride values 
-        strides = [x for x in range(1, max_stride, stride_step)]
         for stride in strides:
-            nconfs_for_stride = stridden_nconfs * stride
+            #nconfs_for_stride = stridden_nconfs * stride
             inst_dir = strides_dir.joinpath(f'{stride}_stride')
             inst_dir.mkdir(parents=True, exist_ok=True)
-            lines[index_index] = f"index = {nconfs_for_stride}\n"
+            lines[index_index] = f"index = {stridden_nconfs}\n"
             lines[index_wdir] = f"wdir = '{inst_dir.absolute()}'\n"
             lines[index_stride] = f"stride = {stride}\n"
             with open(inst_dir.joinpath('RunTdep.py'), 'w') as fl:

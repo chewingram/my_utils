@@ -34,9 +34,9 @@ uc = read(uc_path)
 
 sc = make_supercell(uc, mult_mat)
 
-traj = read(traj_path, index=f'{nthrow}:')
+traj = read(traj_path, index=f'{nthrow}::{stride}')
 random.shuffle(traj)
-traj = read(traj_path, index=':')[:index:stride]
+traj = traj[:index]
 
 # TDEP
 
@@ -54,7 +54,7 @@ extract_ifcs(from_infiles = False,
              rc3 = rc3, 
              polar = polar,
              loto_filepath = loto_filepath, 
-             stride = stride, 
+             stride = 1, # it's already stridden above 
              temperature = temperature,
              bin_prefix = bin_prefix,
              tdep_bin_directory = tdep_bin_directory)
