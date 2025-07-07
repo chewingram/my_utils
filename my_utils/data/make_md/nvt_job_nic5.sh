@@ -1,14 +1,13 @@
 #!/bin/bash
-# Submission script for MareNostrum5
-#SBATCH --job-name=NVT
+# Submission script for NIC5
+#SBATCH --job-name=NVT_inst
 #SBATCH --output=%j.out
 #SBATCH --error=%j.err
-#SBATCH --ntasks=
+#SBATCH --ntasks=64
+#SBATCH --mem-per-cpu=4000
 #SBATCH --cpus-per-task=1
-#SBATCH --time=
-#SBATCH --partition=gpp
-#SBATCH --qos=gp_ehpc
-#SBATCH --account=ehpc14
+#SBATCH --time=00:15:00
+#SBATCH --partition=batch
 #SBATCH --requeue
 
 exec > ${SLURM_SUBMIT_DIR}/${SLURM_JOB_NAME}_${SLURM_JOBID}.log
@@ -27,8 +26,8 @@ echo "threads : $OMP_NUM_THREADS"
 ####################################################################################
 # Load modules and python environment
 module --force purge
-#source /gpfs/home/ulie/ulie583683/environments/intel_2023.2.0
-source /gpfs/home/ulie/ulie583683/environments/gcc_12.3.0_p3.12.1
+source /home/users/s/l/slongo/modules/abinit_2020b
+source /scratch/users/s/l/slongo/venvs/env3.8.6/bin/activate
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 

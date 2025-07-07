@@ -1215,7 +1215,7 @@ def convergence_tdep_stride_or_sampling_size(stride=True,
         elif '$polar$' in lines[i]:
             lines[i] = f'polar = {polar}'
         elif '$loto_filepath$' in lines[i]:
-            lines[i] = f'loto_filepath = {Path(loto_filepath.absolute())}'
+            lines[i] = f'loto_filepath = "{Path(loto_filepath.absolute())}"'
         elif '$first_order$' in lines[i]:
             lines[i] = f'first_order = {first_order}'
         elif '$displ_threshold_firstorder$' in lines[i]:
