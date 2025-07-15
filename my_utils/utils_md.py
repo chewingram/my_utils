@@ -1367,9 +1367,9 @@ def extract_npt_cells(n_inst, temps):
         cells.append(np.array([np.array([y.get_cell() for y in read(x, index=':')]) for x in traj_paths]))
 
     cells = np.array(cells) # shape: n_temps, n_instances, n_timesteps, 3, 3
-    with open('NPT_cells.pkl', 'rb') as fl:
+    with open('NPT_cells.pkl', 'wb') as fl:
         expl = 'Explanation variable. The second element of this file is the array of cells with shape (n_temps, n_instances, n_timesteps, 3, 3)'
-        pkl.dump([expl, cells])
+        pkl.dump([expl, cells], fl)
 
 def conv_npt_cells(mult_mat=None, nfolds=10, n_to_average=4, figdir=None):
     if mult_mat is None:

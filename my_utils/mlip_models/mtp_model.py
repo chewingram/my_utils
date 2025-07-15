@@ -1,17 +1,46 @@
 import json
+import traceback
 from copy import deepcopy as dc
-from ..utils_mlip import train_pot_from_ase_tmp as train_pot_from_ase, conv_ase_to_mlip2_text
+from ..utils_mlip import train_pot_from_ase_tmp as train_pot_from_ase, conv_ase_to_mlip2_text, calc_efs_from_ase
+from ..mtp_models import MlipModel
 from ..utils import flatten
 
 
 
-class MTP_model():
+class MTP_model(MlipModel):
+    self.all_hyperparameters_names = ['mlip_bin',
+                                    'untrained_pot_file_dir',
+                                    'mtp_level',
+                                    'min_dist',
+                                    'max_dist',
+                                    'radial_basis_type',
+                                    'radial_basis_size',
+                                    'ene_weight', 
+                                    'for_weight',
+                                    'str_weight',
+                                    'sc_b_for',
+                                    'val_cfg',
+                                    'max_iter',
+                                    'cur_pot_n', 
+                                    'trained_pot_name', 
+                                    'bfgs_tol', 
+                                    'weighting', 
+                                    'init_par', 
+                                    'skip_preinit', 
+                                    'up_mindist']
+    
+    self.mandatory_hyperparameters = ['mlip_bin',
+                                    'untrained_pot_file_dir',
+                                    'mtp_level',
+                                    'min_dist',
+                                    'max_dist',
+                                    'radial_basis_type',
+                                    'radial_basis_size']
+    
+    hyperparameters_names_for_training_function = []
     def __init__(self,
-                 mtp_level,
-                 min_dist,
-                 max_dist,
-                 radial_basis_size,
-                 radial_basis_type,
+                 root_dir,
+                 hyperparameters=None,
                  train_set=None):
         '''
         mtp_level: {2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 21, 22, 24, 26, 28}
@@ -28,30 +57,31 @@ class MTP_model():
             list of ase Atoms objects; energy, forces and stresses must have been 
             computed and stored in each Atoms object        
         '''
-        self.mtp_level = mtp_level
-        self.min_dist = min_dist
-        self.max_dist = max_dist
-        self.radial_basis_size = radial_basis_size
-        self.radial_basis_type = radial_basis_type
-        self.train_set = train_set
-        self.ml_trainset = None # we need to initialize it
-        self.trainset_bck = None # we need to initialize it
-        if self.train_set is not None:
-            self.species_count = set(flatten([x.get_chemical_symbols for x in self.train_set]))
-        else:
-            self.species_count = None
-        self.is_trained = False
-        self.is_regular = True # since no trainset is there, we can consider it regular, even if not trained
+        super.__init__(self, root_dir, hyperparameters=hyperparameters, train_set=train_set)
+        self.hyperparameters = dict()
+        if hyperparameters is not None:
+            for hp_n, hp_v in hyperparameters.items():
+                if hp_n in all_hyperparameters_names:
+                    self.hyperparameters[hp_n] = hp_v
+
+        
+        
+        
+        # initialize training parameters dictionary
+        
+        for par in training_params_names:
+            self.training_params[par] = None
+
+        # load training parameters from input
+        if train_params is not None:
+            for train_par_name, train_par_val in train_params.items():
+                if train_par_name in self.training_params.keys():
+                    self.trainining_params[train_par_name] = train_par_val
+
+
+
     
-    def train(self, 
-              mlip_bin,
-              untrained_pot_file_dir,
-              training_dir,
-              bin_pref,
-              final_evaluation=True,
-              train_set=None,
-              params=None):
-        '''
+    def train(self, bin_pref=''):'''
         mlip_bin: str
             path to the MTP binary
         
@@ -95,7 +125,7 @@ class MTP_model():
                 iterations
             weighting: {'vibrations', 'molecules', 'structures'}, default=vibrations 
                 how to weight configuration with different sizes relative to each 
-                other
+                other   
             init_par: {'random', 'same'}, default='random'
                 how to initialize parameters if a potential was not pre-fitted;
                 - random: random initialization
@@ -107,40 +137,39 @@ class MTP_model():
                 updating the mindist parameter with actual minimal interatomic 
                 distance in the training set
         '''
-        if train_set is None:
-            txt = ''
-            if self.train_set is not None:
-                train_set = self.train_set
-            else:
-                raise ValueError('To train the potential either the MTP_model object must have the train_set or the parameter train_set must be passed to this method.')
-        else:
-            txt1 = '; the preexisting trainset has been overwritten with the new dataset provided.'
-            txt2 = '; therefore, the preexisting trainset was preserved (not replaced by the new dataset provided)'
-        results = train_pot_from_ase(mlip_bin=mlip_bin,
-                                    untrained_pot_file_dir=untrained_pot_file_dir,
-                                    mtp_level=self.mtp_level,
-                                    min_dist=self.min_dist,
-                                    max_dist=self.max_dist,
-                                    radial_basis_size=self.radial_basis_size,
-                                    radial_basis_type=self.radial_basis_type,
-                                    train_set=train_set,
-                                    dir=training_dir,
-                                    params=params,
-                                    mpirun=bin_pref,
-                                    final_evaluation=final_evaluation)
+
+        pass
+        # todo: check that self.hyperparameters contains the mandatory parameters + the others mandatory vars are there
+        # todo: create the params dictionary
+
+        
+        results = train_pot_from_ase_tmp(mlip_bin=self.hyperparameters['mlip_bin'],
+                                         untrained_pot_file_dir=self.hyperparameters['untrained_pot_file_dir'],
+                                         mtp_level=self.hyperparameters['mtp_level'],
+                                         min_dist=self.hyperparameters['min_dist'],
+                                         max_dist=self.hyperparameters['max_dist'],
+                                         radial_basis_size=self.hyperparameters['radial_basis_size'],
+                                         radial_basis_type=self.hyperparameters['radial_basis_type'],
+                                         train_set=self.train_set,
+                                         dir=self.training_dir,
+                                         params=params,
+                                         mpirun=bin_pref,
+                                         final_evaluation=False)
         
         # we need to check that the training went to completion
         with open(training_dir,joinpath('log_train'), 'r') as fl:
             lines = fl.readlines()
             if any(['* * * TRAIN ERRORS * * *' in line for line in lines]):
-                print('Training done successfully' + txt1)
-                self.train_set = train_set # in case train_set was given, we want to set it as self.train_set only if the training was successful
+                success = True
+                
             else:
-                print('The training was not successful' + txt2)
-                return
+                success = False
+                
+                return success
 
         self.species_count = len(set(flatten([x.get_chemical_symbols() for x in train_set])))
 
+        # todo: deal with the final evaluation, if needed
         if final_evaluation == True:
             trained_pot_file_path = results[0]
             ml_trainset = results[1]
@@ -148,42 +177,36 @@ class MTP_model():
             self.ml_trainset = ml_trainset
         else:
             trained_pot_file_path = results
-            
-        self.trained_pot_path = trained_pot_file_path
+        self.trained_pot = dict()    
+        self.trained_pot['path'] = trained_pot_file_path
         with open(trained_pot_file_path, 'r') as fl:
-            self.trained_pot = fl.readlines()
-        
-        self.is_trained = True
-        self.make_regular()
-    
-    def make_regular(self):
-        '''If there is trainset_bck, it will be removed'''
-        if self.trainset_bck not None:
-            self.trainset_bck = None
-        self.is_regular = True
-    
-    def make_irregular(self):
-        self.is_regular = False
-    
-    def set_trainset(self, dataset):
-        if self.is_regular:
-            self.make_irregular()
-        self.trainset_bck = self.train_set
-        self.train_set = dataset
+            self.trained_pot['text_file'] = fl.readlines()
 
-    def unset_trainset(self):
-        '''If there is trainset_bck, it will remain'''
-        self.train_set = None
-        self.is_regular = True
-    
-    def reset_trainset_bck(self):
-        '''If there is self.trainset_bck, it is assigned to self.train_set and then removed'''
-        print('Reset of the previous train set backup')
-        if self.trainset_bck is not None:
-            self.train_set = self.trainset_bck
-            self.trainset_bck = None
+
+    def _compute_properties(atoms, wdir, **kwargs)
+            
+        if isinstance(atoms, list):
+            if not all([isinstance(x, Atoms) for x in list]):
+                raise TypeError('The variable `atoms` must be an ASE atoms object or a list of ASE atoms objects!')
+        elif isinstance(atoms, Atoms):
+            atoms = [atoms]
+        
+        wdir = Path(wdir)
+
+        if 'bin_pref' in kwargs.keys():
+            bin_pref = kwargs['bin_pref']
         else:
-            print('No preexisting train set backup; aborted!')
+            bin_pref = ''
+
+        atoms_calc = calc_efs_from_ase(mlip_bin=self.hyperparameters['mlip_bin'], 
+                                        atoms=atoms, 
+                                        mpirun=bin_pref, 
+                                        pot_path=self.trained_pot['path'], 
+                                        cfg_files=False, 
+                                        dir=wdir,
+                                        write_conf=False)
+        return atoms_calc
+            
         
     def save_model(self, filepath):
         '''We want to store this model as JSON'''

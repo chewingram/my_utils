@@ -14,6 +14,7 @@ import shutil
 from copy import deepcopy as cp
 from termcolor import colored
 import pickle as pkl
+from random import shuffle
 
 binpath = shutil.which('extract_forceconstants')
 if binpath is not None:
@@ -1292,6 +1293,75 @@ def convergence_tdep_stride_or_sampling_size(stride=True,
 
 
 
+def new_convergence_stride(temperature=0,
+                           root_dir='./',
+                           tdep_bin_directory = Path(g_tdep_bin_directory),
+                           bin_prefix = '',
+                           first_order = True,
+                           displ_threshold_firstorder = 0.0001,
+                           max_iterations_first_order = 20,
+                           nthrow = 0,
+                           rc2 = 10,
+                           rc3 = 5,
+                           ts = 1,
+                           size_step=1000,
+                           max_stride=None,
+                           stride_step=None,
+                           uc_path = 'unitcell.json',
+                           mult_mat = [[1,0,0],[0,1,0],[0,0,1]],
+                           traj_path = './Trajectory.traj',
+                           polar = False,
+                           loto_filepath = None):
+    root_dir = Path(root_dir)
+    unitcell = read(uc_path)
+    supercell = make_supercell(unitcell, mult_mat)
+    strides = list(range(0, max_stride, stride_step))
+    traj = read(traj_path, index=':')
+    shuffle(traj)
+    sizes = [size_step, len(traj), size_step]
+    for stride in strides:
+        stride_dir = root_dir.joinpath(f'stride_{stride}')
+        stride_dir.mkdir(parents=True, exist_ok=True)
+        print(f'****** Stride = {stride} ******')
+        ifcs = []
+        for i_s, size in enumerate(sizes):
+            print(f'------ Stride = {stride}, size = {size} ------')
+            size_dir = stride_dir.joinpath(f'size_{size}')
+            size_dir.mkdir(parents=True, exist_ok=True)
+            extract_ifcs(from_infiles = False,
+                        infiles_dir = None,
+                        unitcell = None,
+                        supercell = None,
+                        sampling = None,
+                        timestep = 1,
+                        dir = size_dir,
+                        first_order = first_order,
+                        displ_threshold_firstorder = displ_threshold_firstorder,
+                        max_iterations_first_order = max_iterations_first_order,
+                        rc2 = rc2, 
+                        rc3 = rc3, 
+                        polar = polar,
+                        loto_filepath = loto_filepath, 
+                        stride = stride, 
+                        temperature = temperature,
+                        bin_prefix = bin_prefix,
+                        tdep_bin_directory = tdep_bin_directory)
+            ifcs.append(parse_outfile_forceconstants(size_dir.joinpath('outfile.forceconstant')))
+            if i_s > 0:
+                diffs = np.abs(ifcs[-1] - ifcs[-2])
+                avg_diff = np.mean(diffs)
+                if avg_diff < ifc_threshold:
+                    print(f'Average difference in IFCs (eV/Ang^2) between size {size} and {sizes[i_s-1]}= {avg_diff:.10f} < {ifc_threshold}!')
+                    print(f'Convergence reached at size {size}')
+                    break
+                else:
+                    print(f'Average difference in IFCs (eV/Ang^2) between size {size} and {sizes[i_s-1]}= {avg_diff:.10f} >= {ifc_threshold}!')
+
+        
+
+
+
+
 
 def old_convergence_tdep_mdlen(
         temperature,
@@ -2037,7 +2107,7 @@ def conv_rc3_extract_ifcs(unitcell = None,
             avg_diffss = np.mean(diffss, axis=(1,2,3,4)) # shape: n_rc3_to_average
             avg_avg_diff = np.mean(avg_diffss)
             max_diffss = np.max(diffss, axis=(1,2,3,4)) # shape: n_rc3_to_average
-            avg_max_diff = (np.mean(max_diffss))
+            avg_max_diff = np.mean(max_diffss)
             
             if conv_criterion_diff == 'avg':
                 value_to_compare_txt = 'average'
