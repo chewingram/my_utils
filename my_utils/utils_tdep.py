@@ -1351,8 +1351,9 @@ def new_convergence_stride(temperature=0,
                         tdep_bin_directory = tdep_bin_directory)
             ifcs.append(parse_outfile_forceconstants(size_dir.joinpath('outfile.forceconstant'), unitcell=unitcell, supercell=supercell))
             if i_s > 0:
+                weights = np.abs(ifcs[-1]) + np.abs(ifcs[-2])
                 diffs = np.abs(ifcs[-1] - ifcs[-2])
-                avg_diff = np.mean(diffs)
+                avg_diff = (diffs * weights / weights.sum()).sum()
                 if avg_diff < ifc_threshold:
                     print(f'Average difference in IFCs (eV/Ang^2) between size {size} and {sizes[i_s-1]} = {avg_diff:.10f} < {ifc_threshold}!')
                     print(f'Convergence reached at size {size}')
