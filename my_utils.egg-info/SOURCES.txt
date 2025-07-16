@@ -2,7 +2,9 @@ MANIFEST.in
 setup.py
 my_utils/Graphics_matplotlib.py
 my_utils/__init__.py
+my_utils/calculators.py
 my_utils/phonon_utils.py
+my_utils/redo_stdep.py
 my_utils/utils.py
 my_utils/utils_abinit.py
 my_utils/utils_cross_validation.py

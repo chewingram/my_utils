@@ -1307,6 +1307,7 @@ def new_convergence_stride(temperature=0,
                            size_step=1000,
                            max_stride=None,
                            stride_step=None,
+                           ifc_threshold=0.0001,
                            uc_path = 'unitcell.json',
                            mult_mat = [[1,0,0],[0,1,0],[0,0,1]],
                            traj_path = './Trajectory.traj',
@@ -1315,11 +1316,12 @@ def new_convergence_stride(temperature=0,
     root_dir = Path(root_dir)
     unitcell = read(uc_path)
     supercell = make_supercell(unitcell, mult_mat)
-    strides = list(range(0, max_stride, stride_step))
+    strides = list(range(1, max_stride, stride_step))
     traj = read(traj_path, index=':')
-    shuffle(traj)
-    sizes = [size_step, len(traj), size_step]
+    sizes = list(range(size_step, len(traj), size_step))
     for stride in strides:
+        stridden_traj = traj[::stride]
+        shuffle(stridden_traj)
         stride_dir = root_dir.joinpath(f'stride_{stride}')
         stride_dir.mkdir(parents=True, exist_ok=True)
         print(f'****** Stride = {stride} ******')
@@ -1330,9 +1332,9 @@ def new_convergence_stride(temperature=0,
             size_dir.mkdir(parents=True, exist_ok=True)
             extract_ifcs(from_infiles = False,
                         infiles_dir = None,
-                        unitcell = None,
-                        supercell = None,
-                        sampling = None,
+                        unitcell = unitcell,
+                        supercell = supercell,
+                        sampling = stridden_traj[:size],
                         timestep = 1,
                         dir = size_dir,
                         first_order = first_order,
@@ -1346,16 +1348,16 @@ def new_convergence_stride(temperature=0,
                         temperature = temperature,
                         bin_prefix = bin_prefix,
                         tdep_bin_directory = tdep_bin_directory)
-            ifcs.append(parse_outfile_forceconstants(size_dir.joinpath('outfile.forceconstant')))
+            ifcs.append(parse_outfile_forceconstants(size_dir.joinpath('outfile.forceconstant'), unitcell=unitcell, supercell=supercell))
             if i_s > 0:
                 diffs = np.abs(ifcs[-1] - ifcs[-2])
                 avg_diff = np.mean(diffs)
                 if avg_diff < ifc_threshold:
-                    print(f'Average difference in IFCs (eV/Ang^2) between size {size} and {sizes[i_s-1]}= {avg_diff:.10f} < {ifc_threshold}!')
+                    print(f'Average difference in IFCs (eV/Ang^2) between size {size} and {sizes[i_s-1]} = {avg_diff:.10f} < {ifc_threshold}!')
                     print(f'Convergence reached at size {size}')
                     break
                 else:
-                    print(f'Average difference in IFCs (eV/Ang^2) between size {size} and {sizes[i_s-1]}= {avg_diff:.10f} >= {ifc_threshold}!')
+                    print(f'Average difference in IFCs (eV/Ang^2) between size {size} and {sizes[i_s-1]} = {avg_diff:.10f} >= {ifc_threshold}!')
 
         
 
