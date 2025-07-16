@@ -1325,6 +1325,7 @@ def new_convergence_stride(temperature=0,
         stride_dir = root_dir.joinpath(f'stride_{stride}')
         stride_dir.mkdir(parents=True, exist_ok=True)
         print(f'****** Stride = {stride} ******')
+        print(f'Maximum size with this stride: {len(stridden_traj)} configurations')
         ifcs = []
         for i_s, size in enumerate(sizes):
             print(f'------ Stride = {stride}, size = {size} ------')
