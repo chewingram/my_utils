@@ -1173,6 +1173,7 @@ def convergence_tdep_stride_or_sampling_size(stride=True,
                                              uc_path = 'unitcell.json',
                                              mult_mat = [[1,0,0],[0,1,0],[0,0,1]],
                                              traj_path = './Trajectory.traj',
+                                             traj_size = 'full'
                                              polar = False,
                                              loto_filepath = None,
                                              job=False,
@@ -1234,8 +1235,9 @@ def convergence_tdep_stride_or_sampling_size(stride=True,
 
     conv_dir = root_dir.joinpath('Convergence_tdep')
     conv_dir.mkdir(parents=True, exist_ok=True)
-    
     ats = read(traj_path, index=':')
+    if traj_size != 'full':
+        ats = ats[:traj_size]
     nconfs = len(ats)
 
     if sampling_size == True:
@@ -1873,7 +1875,8 @@ def conv_rc2_extract_ifcs(unitcell = None,
             print('Assessing the convergence')
             cifcs = np.array(ifcs.copy()) # "c" stands for copy; shape: n_rc2_done, n_atoms_ucell, n_atoms_scell, 3, 3
             diffss = np.abs(cifcs[-1][np.newaxis,:] - cifcs[-1-n_rc2_to_average:-1]) # shape: n_rc2_to_average, n_atoms_ucell, n_atoms_scell, 3, 3
-            avg_diffss = np.mean(diffss, axis=(1,2,3,4)) # shape: n_rc2_to_average
+            weights = np.abs(cifcs[-1][np.newaxis,:]) + np.abs(cifcs[-1-n_rc2_to_average:-1])
+            avg_diffss = (diffss * weights / weigths.sum()).sum(axis=(1,2,3,4)) # shape: n_rc2_to_average
             avg_avg_diff = np.mean(avg_diffss)
             max_diffss = np.max(diffss, axis=(1,2,3,4)) # shape: n_rc2_to_average
             avg_max_diff = (np.mean(max_diffss))
