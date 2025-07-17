@@ -1328,6 +1328,10 @@ def new_convergence_stride(temperature=0,
         print(f'Maximum size with this stride: {len(stridden_traj)} configurations')
         ifcs = []
         for i_s, size in enumerate(sizes):
+            if size > len(stridden_traj):
+                print(f'Only {len(stridden_traj)} configurations; not enough to try size = {size}')
+                print(f'xxxxxx Stride = {stride} did not converge! xxxxxx')
+                break
             print(f'------ Stride = {stride}, size = {size} ------')
             size_dir = stride_dir.joinpath(f'size_{size}')
             size_dir.mkdir(parents=True, exist_ok=True)
