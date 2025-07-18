@@ -5,17 +5,15 @@ import traceback
 from ase.atoms import Atoms
 
 
-
-class GenError(Exception):
-    def __init__(self, message):
-        super().__init__(message)
-
 class MlipModel(ABC):
 
     def __init__(self, root_dir, train_set=None, hyperparameters=None):
         
         self.root_dir = Path(root_dir)
+        self.root_dir.mkdir(exsist_ok=True, parents=True)
         self.training_dir = root_dir.joinpath('training')
+        self.mkdir(exsist_ok=True, parents=True)
+
         if hyperparameters is not None:
             self.hyperparameters = hyperparameters
         else:
@@ -56,6 +54,9 @@ class MlipModel(ABC):
     def train(self):
         pass
     
+    @abstractmethod
+    def store_trained(self):
+        pass
 
     def train_model(self, train_set=None, training_hyperparameters=None, bin_pref='', final_evaluation):
         '''
@@ -126,11 +127,39 @@ class MlipModel(ABC):
         elif level == 'h':
             self.regular['h'] = False
     
+    def is_regular(self, level=''):
+        if level=='':
+            if self.regular['h'] == True and self.regular['d'] == True:
+                return True
+            else:
+                return False
+        elif level == 'd':
+            if self.regular['d'] == True:
+                return True
+            else:
+                return False
+        elif level == 'h':
+            if self.regular['h'] == True:
+                return True
+            else:
+                return False
+            
+    
+    def compute_properties(self, atoms, wdir, parameters):
+        if not self.is_trained:
+            raise ValueError('The calculation cannot be done because the model is not trained!')
+        elif not self.is_regular():
+            raise ValueError('The calculation cannot be done because the model is not regular!')
+        
+        atoms_calc = self._compute_properties(atoms=atoms, wdir=wdir, **parameters)
+        return atoms_calc
+    
+
     @abstractmethod
-    def _compute_properties(atoms):
+    def _compute_properties(self, atoms, wdir, **kwargs):
     pass    
 
-    def compute_properties(atoms, parameters)
+    
     
     # def _set_trainset(self, dataset):
     #     if (not self.is_trained and self.train_set is not None) or self.is_regular('d'):

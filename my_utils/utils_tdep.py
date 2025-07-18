@@ -1876,7 +1876,7 @@ def conv_rc2_extract_ifcs(unitcell = None,
             cifcs = np.array(ifcs.copy()) # "c" stands for copy; shape: n_rc2_done, n_atoms_ucell, n_atoms_scell, 3, 3
             diffss = np.abs(cifcs[-1][np.newaxis,:] - cifcs[-1-n_rc2_to_average:-1]) # shape: n_rc2_to_average, n_atoms_ucell, n_atoms_scell, 3, 3
             weights = np.abs(cifcs[-1][np.newaxis,:]) + np.abs(cifcs[-1-n_rc2_to_average:-1])
-            avg_diffss = (diffss * weights / weigths.sum()).sum(axis=(1,2,3,4)) # shape: n_rc2_to_average
+            avg_diffss = (diffss * weights / weights.sum()).sum(axis=(1,2,3,4)) # shape: n_rc2_to_average
             avg_avg_diff = np.mean(avg_diffss)
             max_diffss = np.max(diffss, axis=(1,2,3,4)) # shape: n_rc2_to_average
             avg_max_diff = (np.mean(max_diffss))
@@ -1908,7 +1908,7 @@ def conv_rc2_extract_ifcs(unitcell = None,
     if converged == False:
         print_rb(f'The IFC did not converge! You probably need bigger values of rc2!')
 
-    ifcs = np.array(ifcs)
+    ifcs = np.array(ifcs) # shape: n_rc2s_done, n_at_unit, n_at_super, 3,3 (n_rc2s_done is the number of rc2s done before converging, including the converged one)
     # let's save the ifcs somewhere, so that they can be analyzed in the future
     expl = 'This pickle file contains the results of the convergence of IFCs w.r.t. rc2. There are three variables:\n1. this explanatory variabe\n'
     expl += '2. the list ifcs of shape (n_rc2s,natoms_unit, natoms_super, 3, 3) in eV/Angst^2\n3. the list of rc2s.'
@@ -1917,9 +1917,10 @@ def conv_rc2_extract_ifcs(unitcell = None,
         pkl.dump(results, fl)
     
     last_ifc_path = dir.joinpath(f'rc2_{rc2s[i_rc2]}/outfile.forceconstant') # this might be converged or not, but it's the last made
-    diffs = np.array([abs(ifcs[i] - ifcs[i-1]) for i in range(1, ifcs.shape[0])])
+    diffs = np.abs(ifcs[1:] - ifcs[:-1])
+    weights = np.abs(ifcs[1:]) + np.abs(ifcs[:-1])
     max_diffs = np.max(diffs,axis=(1,2,3,4))
-    avg_diffs = np.mean(diffs, axis=(1,2,3,4))
+    avg_diffs = (diffs * weights / weights.sum()).sum(axis=(1,2,3,4))
 
     Fig = plt.figure(figsize=(15,4))
     Fig.add_subplot(1,2,1)
@@ -1958,6 +1959,7 @@ def conv_rc3_extract_ifcs(unitcell = None,
                           bin_prefix = '',
                           tdep_bin_directory = None,
                           ifc_diff_threshold = 0.001, # eV/A^2
+                          ifc_diff_threshold_3 = 0.0001, # eV/A^3
                           n_rc3_to_average = 4,
                           conv_criterion_diff = 'avg'): 
     
@@ -2006,7 +2008,9 @@ def conv_rc3_extract_ifcs(unitcell = None,
     tdep_bin_directory : str or Path
         Path to the TDEP binaries.
     ifc_diff_threshold : float
-        Threshold (in eV/Ang^2) for convergence assessment.
+        Threshold (in eV/Ang^2) for convergence assessment of the 2nd-order IFCs.
+    ifc_diff_threshold_3 : float
+        Threshold (in eV/Ang^3) for convergence assessment of the 3rd-order IFCs.
     n_rc3_to_average : int
         Number of previous `rc3` IFCs to average over for convergence assessment.
     conv_criterion_diff : str
@@ -2084,6 +2088,7 @@ def conv_rc3_extract_ifcs(unitcell = None,
     print('Starting the extraction for each rc3 value')
 
     ifcs = []
+    ifcs_3 = []
     for i_rc3, rc3 in enumerate(rc3s):
         print_b(f'+++ rc3 = {rc3} Angstroms +++')
         rc3_dir = dir.joinpath(f'rc3_{rc3}')
@@ -2108,30 +2113,50 @@ def conv_rc3_extract_ifcs(unitcell = None,
                 tdep_bin_directory = tdep_bin_directory)
         
         new_ifcs = parse_outfile_forceconstants(rc3_dir.joinpath('outfile.forceconstant'), unitcell, supercell) # shape: n_atoms_ucell, n_atoms_scell, 3, 3
-        ifcs.append(new_ifcs)  
+        ifcs.append(new_ifcs) 
 
+        new_ifcs_3 =  parse_outfile_forceconstants_3(rc3_dir.joinpath('outfile.forceconstant_thirdorder'), unitcell, supercell) # shape: n_atoms_ucell, n_atoms_scell, n_atoms_scell, 9, 3
+        ifcs_3.append(new_ifcs_3)
         converged = False
         if i_rc3 >= n_rc3_to_average:
             print('Assessing the convergence')
             cifcs = np.array(ifcs.copy()) # "c" stands for copy; shape: n_rc3_done, n_atoms_ucell, n_atoms_scell, 3, 3
             diffss = np.abs(cifcs[-1][np.newaxis,:] - cifcs[-1-n_rc3_to_average:-1]) # shape: n_rc3_to_average, n_atoms_ucell, n_atoms_scell, 3, 3
-            avg_diffss = np.mean(diffss, axis=(1,2,3,4)) # shape: n_rc3_to_average
+            weights = np.abs(cifcs[-1][np.newaxis,:]) + np.abs(cifcs[-1-n_rc3_to_average:-1])
+            avg_diffss = (diffss * weights / weights.sum()).sum(axis=(1,2,3,4)) # shape: n_rc3_to_average
             avg_avg_diff = np.mean(avg_diffss)
             max_diffss = np.max(diffss, axis=(1,2,3,4)) # shape: n_rc3_to_average
             avg_max_diff = np.mean(max_diffss)
+
+            cifcs_3 = np.array(ifcs_3.copy()) # "c" stands for copy; shape: n_rc3_done, n_atoms_ucell, n_atoms_scell, 3, 3
+            diffss_3 = np.abs(cifcs_3[-1][np.newaxis,:] - cifcs_3[-1-n_rc3_to_average:-1]) # shape: n_rc3_to_average, n_atoms_ucell, n_atoms_scell, 3, 3
+            weights_3 = np.abs(cifcs_3[-1][np.newaxis,:]) + np.abs(cifcs_3[-1-n_rc3_to_average:-1])
+            avg_diffss_3 = (diffss_3 * weights_3 / weights_3.sum()).sum(axis=(1,2,3,4)) # shape: n_rc3_to_average
+            avg_avg_diff_3 = np.mean(avg_diffss_3)
+            max_diffss_3 = np.max(diffss_3, axis=(1,2,3,4)) # shape: n_rc3_to_average
+            avg_max_diff_3 = np.mean(max_diffss_3)
+
+
+
             
             if conv_criterion_diff == 'avg':
                 value_to_compare_txt = 'average'
                 value_to_compare = avg_avg_diff
+                value_to_compare_3 = avg_avg_diff_3
             elif conv_criterion_diff == 'max':
                 value_to_compare_txt = 'maximum'
                 value_to_compare = avg_max_diff
+                value_to_compare_3 = avg_max_diff_3
             
-            print(f'Maximum difference in the IFCs, averaged over the last {n_rc3_to_average} extractions: {avg_max_diff} eV/Angstrom^2')
-            print(f'Average difference in the IFCs, averaged over the last {n_rc3_to_average} extractions: {avg_avg_diff} eV/Angstrom^2')
+            print(f'Maximum difference in the 2nd-order IFCs, averaged over the last {n_rc3_to_average} extractions: {avg_max_diff} eV/Angstrom^2')
+            print(f'Average difference in the 2nd-order IFCs, averaged over the last {n_rc3_to_average} extractions: {avg_avg_diff} eV/Angstrom^2')
 
-            if value_to_compare < ifc_diff_threshold:
-                text = colored(f'Since {value_to_compare_txt} = {value_to_compare} < {ifc_diff_threshold} (ev/Angstrom^2), ', 'green')
+            print(f'Maximum difference in the 3rd-order IFCs, averaged over the last {n_rc3_to_average} extractions: {avg_max_diff_3} eV/Angstrom^2')
+            print(f'Average difference in the 3rd-order IFCs, averaged over the last {n_rc3_to_average} extractions: {avg_avg_diff_3} eV/Angstrom^2')
+
+            if value_to_compare < ifc_diff_threshold and value_to_compare_3 < ifc_diff_threshold_3:
+                text = colored(f'Since {value_to_compare_txt} = {value_to_compare} < {ifc_diff_threshold} (ev/Angstrom^2),\n ', 'green')
+                text = colored(f'and {value_to_compare_txt} = {value_to_compare} < {ifc_diff_threshold} (ev/Angstrom^2),\n ', 'green')
                 text += colored(f'the IFCs can be considered converged with rc2 = {rc2} and rc3 = {rc3} Angstroms!', 'green', attrs=['bold'])
                 print(text)
                 converged = True
@@ -2148,35 +2173,57 @@ def conv_rc3_extract_ifcs(unitcell = None,
         print_rb(f'The IFC did not converge! You probably need bigger values of rc3!')
 
     ifcs = np.array(ifcs)
+    ifcs_3 = np.array(ifcs_3)
     # let's save the ifcs somewhere, so that they can be analyzed in the future
-    expl = 'This pickle file contains the results of the convergence of IFCs w.r.t. rc3. There are three variables:\n1. this explanatory variabe\n'
-    expl += '2. the list ifcs of shape (n_rc3s,natoms_unit, natoms_super, 3, 3) in eV/Angst^2\n3. the list of rc3s.'
-    results = [expl, ifcs, rc3s[:i_rc3+1]]
+    expl = 'This pickle file contains the results of the convergence of IFCs w.r.t. rc3. There are four variables:\n1. this explanatory variabe\n'
+    expl += '2. the list ifcs of shape (n_rc3s,natoms_unit, natoms_super, 3, 3) in eV/Angst^2\n3. the list 3rd-order ifcs of shape '
+    expl += '(n_rc3s,natoms_unit, natoms_super, natoms_super, 9, 3) in eV/Angst^3\n4. the list of rc3s.'
+    results = [expl, ifcs, ifcs_3, rc3s[:i_rc3+1]]
     with open(dir.joinpath('conv_rc3_results.pkl'), 'wb') as fl:
         pkl.dump(results, fl)
     
     last_ifc_path = dir.joinpath(f'rc3_{rc3s[i_rc3]}/outfile.forceconstant') # this might be converged or not, but it's the last made
-    diffs = np.array([abs(ifcs[i] - ifcs[i-1]) for i in range(1, ifcs.shape[0])])
+    diffs = np.abs(ifcs[1:] - ifcs[:-1])
+    weights = np.abs(ifcs[1:]) + np.abs(ifcs[:-1])    
     max_diffs = np.max(diffs,axis=(1,2,3,4))
-    avg_diffs = np.mean(diffs, axis=(1,2,3,4))
+    avg_diffs = (diffs * weights / weights.sum()).sum(axis=(1,2,3,4))
+
+    last_ifc_path_3 = dir.joinpath(f'rc3_{rc3s[i_rc3]}/outfile.forceconstant_thirdorder') # this might be converged or not, but it's the last made
+    diffs_3 = np.abs(ifcs_3[1:] - ifcs_3[:-1])
+    weights_3 = np.abs(ifcs_3[1:]) + np.abs(ifcs_3[:-1])    
+    max_diffs_3 = np.max(diffs_3,axis=(1,2,3,4))
+    avg_diffs_3 = (diffs_3 * weights_3 / weights_3.sum()).sum(axis=(1,2,3,4))
 
     Fig = plt.figure(figsize=(15,4))
-    Fig.add_subplot(1,2,1)
+    Fig.add_subplot(2,2,1)
     plt.plot(rc3s[1:i_rc3+1], max_diffs, '.')
-    plt.title('IFC convergence: max abs. error')
+    plt.title('2nd-order IFC convergence: max abs. error')
     plt.ylabel('Error on the IFCs (eV/$\mathrm{\AA}^2$)')
     plt.xlabel('rc3 ($\mathrm{\AA}$)')
     
-    Fig.add_subplot(1,2,2)
+    Fig.add_subplot(2,2,2)
     plt.plot(rc3s[1:i_rc3+1], avg_diffs, '.')
-    plt.title('IFC convergence: avg abs. error')
+    plt.title('2nd-order IFC convergence: avg abs. error')
     plt.ylabel('Error on the IFCs (eV/$\mathrm{\AA}^2$)')
+    plt.xlabel('rc3 ($\mathrm{\AA}$)')
+
+    Fig = plt.figure(figsize=(15,4))
+    Fig.add_subplot(2,2,3)
+    plt.plot(rc3s[1:i_rc3+1], max_diffs_3, '.')
+    plt.title('3rd-order IFC convergence: max abs. error')
+    plt.ylabel('Error on the IFCs (eV/$\mathrm{\AA}^3$)')
+    plt.xlabel('rc3 ($\mathrm{\AA}$)')
+    
+    Fig.add_subplot(2,2,4)
+    plt.plot(rc3s[1:i_rc3+1], avg_diffs_3, '.')
+    plt.title('3rd-IFC convergence: avg abs. error')
+    plt.ylabel('Error on the IFCs (eV/$\mathrm{\AA}^3$)')
     plt.xlabel('rc3 ($\mathrm{\AA}$)')
     
     figpath = dir.joinpath(f'Convergence.png')
     plt.savefig(fname=figpath, bbox_inches='tight', dpi=600, format='png')
     
-    return rc3s[i_rc3], i_rc3, last_ifc_path, converged
+    return rc3s[i_rc3], i_rc3, last_ifc_path, last_ifc_path_3, converged
 
 
 def parse_outfile_forceconstants(filepath, unitcell, supercell):
@@ -2254,6 +2301,113 @@ def parse_outfile_forceconstants(filepath, unitcell, supercell):
         k += 1+5*nns
 
     return ifc # shape n_atoms_unitcell, n_atoms_supercell, 3, 3
+
+
+
+
+def parse_outfile_forceconstants_3(filepath, unitcell, supercell):
+    
+    def find_index_in_unitcell(red_position, unitcell):
+        scaled_positions = unitcell.get_scaled_positions()
+        return np.argmin(np.linalg.norm(scaled_positions - red_position, axis=1))
+
+    mat = supercell.get_cell() @ np.linalg.inv(unitcell.get_cell())
+    filepath = Path(filepath)
+    
+    with open(filepath, 'r') as fl:
+        lines = fl.readlines()
+    lines = [x.split() for x in lines]
+    nats_s = len(supercell)
+    nats_u = len(unitcell)
+
+    cell = unitcell.get_cell()
+    upositions_red = unitcell.get_scaled_positions()# reduced positions in the unit cell, in unit cell coord
+    upositions_red[np.abs(upositions_red) < 1E-10] = 0 
+    
+    positions = supercell.get_positions() # nats, 3
+    positions_red = (np.linalg.inv(cell.T) @ positions.T).T # in unit cell coord
+    positions_red[np.abs(positions_red) < 1E-10] = 0
+    atoms_tuples = []
+    for i, atom in enumerate(supercell):
+        frac_part = positions_red[i] % 1 # works for both positive and negative reduced coords!!! e.g. -1.3 % 1 = 0.7, not -0.3
+        ind1 = find_index_in_unitcell(frac_part, unitcell)
+        repetition_indices1 = [np.floor(positions_red[i][0]).astype(int), np.floor(positions_red[i][1]).astype(int),np.floor(positions_red[i][2]).astype(int)] # again, works for positive and negative numbers, np.floor(-1.3) = -2, not -1!!
+        for j, atom2 in enumerate(supercell):
+            frac_part = positions_red[j] % 1 # works for both positive and negative reduced coords!!! e.g. -1.3 % 1 = 0.7, not -0.3
+            ind2 = find_index_in_unitcell(frac_part, unitcell)
+            repetition_indices2 = [np.floor(positions_red[j][0]).astype(int), np.floor(positions_red[j][1]).astype(int),np.floor(positions_red[j][2]).astype(int)] # again, works for positive and negative numbers, np.floor(-1.3) = -2, not -1!!
+        
+            atoms_tuples.append([(ind1, ind2, *repetition_indices1, *repetition_indices2),(i,j)])
+        
+    # now atoms_tuples is a list of tuples (ind, R1, R2, R3), where ind is the index of the atom in the unitcell and R1/2/3 are the component of the position of the repetition in reduced coordinates
+    
+
+    ifc = np.zeros((nats_u, nats_s, nats_s, 9, 3))
+    k = 2
+    for i in range(nats_u):
+        ntps = int(lines[k][0]) # number of triplets for atom i 
+        for n in range(ntps):
+            ci1 = k+2+15*n # line with the index of the neighbour1 in the unitcell
+            ci2 = k+3+15*n # line with the index of the neighbour2 in the unitcell
+            neigh1_unit_ind = int(lines[ci1][0])-1 # index of the neighbour1 in the unitcell
+            neigh2_unit_ind = int(lines[ci2][0])-1 # index of the neighbour2 in the unitcell
+            # let's retrieve the vector of the repetition of the unitcell of neighbour1 in the unit cell (red) coords.
+            vec_u1 = np.array([float(lines[ci1+3][0]), float(lines[ci1+3][1]), float(lines[ci1+3][2])])
+            vec_u2 = np.array([float(lines[ci2+3][0]), float(lines[ci2+3][1]), float(lines[ci2+3][2])])
+
+            # let's get the the vector of the the current neighbour1 and neighbour2 in the unit cell (red) coords.
+            curr_pos_u1 = upositions_red[neigh1_unit_ind] + vec_u1
+            curr_pos_u2 = upositions_red[neigh2_unit_ind] + vec_u2 
+
+            # let's write curr_pos_u in the super cell (red) coords            
+            # we need to change the basis of from the unitcell vectors to the supercell vectors
+            # x^u = L x^s where L is P.T, where P is the mat_mult used to create the supercell from the unitcell
+            # in principle we can compute x^s = L^-1 @ x^u, but np.solve is faster
+            
+            curr_pos_s1 = np.linalg.solve(mat.T, curr_pos_u1) # position of the current neighbour in the super cell (red) coords.
+            curr_pos_s1[np.abs(curr_pos_s1) < 1E-10] = 0 # clean
+            
+            # let's wrap it inside the supercell
+            curr_pos_s_wrapped1 = curr_pos_s1 % 1 
+
+            # now let's put it back to the unit cell (red) coords.
+            curr_pos_u_wrapped1 = np.linalg.solve(np.linalg.inv(mat.T), curr_pos_s_wrapped1)
+
+            # let's write the vector of the repetition of the unitcell of the current neighbour in the unit cell (red) coords. after the wrapping
+            curr_repetition_indices1 = [np.floor(curr_pos_u_wrapped1[0]).astype(int), np.floor(curr_pos_u_wrapped1[1]).astype(int),np.floor(curr_pos_u_wrapped1[2]).astype(int)] 
+
+
+            # let's do the same for neighbour 2
+            curr_pos_s2 = np.linalg.solve(mat.T, curr_pos_u2) # position of the current neighbour in the super cell (red) coords.
+            curr_pos_s2[np.abs(curr_pos_s2) < 1E-10] = 0 # clean
+            
+            # let's wrap it inside the supercell
+            curr_pos_s_wrapped2= curr_pos_s2 % 1 
+
+            # now let's put it back to the unit cell (red) coords.
+            curr_pos_u_wrapped2 = np.linalg.solve(np.linalg.inv(mat.T), curr_pos_s_wrapped2)
+
+            # let's write the vector of the repetition of the unitcell of the current neighbour in the unit cell (red) coords. after the wrapping
+            curr_repetition_indices2 = [np.floor(curr_pos_u_wrapped2[0]).astype(int), np.floor(curr_pos_u_wrapped2[1]).astype(int),np.floor(curr_pos_u_wrapped2[2]).astype(int)] 
+            
+
+            current_tuple = (neigh1_unit_ind, neigh2_unit_ind, *curr_repetition_indices1, *curr_repetition_indices2)
+
+            # TO DO: CHECK NEXT LINE!!!!!
+            index = [tuples[0] for tuples in atoms_tuples].index(current_tuple) # find the matching tuple, j is the index of the neighbour in the supercell
+            j = atoms_tuples[index][1][0]
+            p = atoms_tuples[index][1][1]
+            tens = []
+            for m in range(9):
+                tens.append([float(lines[ci1+5+m][0]), float(lines[ci1+5+m][1]), float(lines[ci1+5+m][2])])
+
+            tens = np.array(tens, dtype='float')
+            ifc[i,j,p] += tens
+        k += 1+15*ntps
+
+    return ifc # shape n_atoms_unitcell, n_atoms_supercell, n_atoms_supercell, 9, 3
+
+
 
 def run_phonons(dir, ucell, scell, ifc_file, qgrid=32, tdep_bin_directory=None, bin_pref='', dos=False, units='thz'):
     write(dir.joinpath('infile.ucposcar'), ucell, format='vasp')

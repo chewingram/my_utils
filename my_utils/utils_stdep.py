@@ -751,7 +751,7 @@ def launch_stdep(root_dir: str = './',
         
         min_dist = min([min_distance_to_surface(x.get_cell()) for x in latest_confs_computed]) ##
 
-
+        # extract ifcs (only 2nd order)
         conv_rc2, i_conv_rc2, last_ifc_path, converged = tdp.conv_rc2_extract_ifcs(unitcell = ucell,
                                                                     supercell = scell,
                                                                     sampling = latest_confs_computed,
@@ -811,8 +811,9 @@ def launch_stdep(root_dir: str = './',
     ifcs = np.array(ifcs)
     ifcs = np.array(ifcs)
     diffs = np.abs(ifcs[1:] - ifcs[:-1])
+    weights = np.abs(ifcs[1:]) + np.abs(ifcs[:-1])
     max_diffs = np.max(diffs, axis=(1, 2, 3, 4))
-    avg_diffs = np.mean(diffs, axis=(1, 2, 3, 4))
+    avg_diffs = (diffs * weights / weights.sum()).sum(axis=(1, 2, 3, 4))
     Fig = plt.figure(figsize=(15,4))
     Fig.add_subplot(1,2,1)
     for i_p in range(len(converged_list[1:])):
@@ -891,8 +892,9 @@ def conv_iterations(root_dir, nconfs, iters_dir, verbose=True):
     ifcs = np.array(ifcs)
     ifcs = np.array(ifcs)
     diffs = np.abs(ifcs[1:] - ifcs[:-1])
+    weights = np.abs(ifcs[1:]) + np.abs(ifcs[:-1])
     max_diffs = np.max(diffs, axis=(1, 2, 3, 4))
-    avg_diffs = np.mean(diffs, axis=(1, 2, 3, 4))
+    avg_diffs = (diffs * weights / weights.sum()).sum(axis=(1,2,3,4))
     Fig = plt.figure(figsize=(15,11))
     Fig.add_subplot(2,1,1)
     plt.plot(nconfs_actual[1:], max_diffs, '.')
@@ -966,7 +968,7 @@ def conv_sizes(size_folders=None, labels=None, tdep_bin_directory=None, bin_pref
         ph_dir = max_iter_dir.joinpath('phonons')
         ph_dir.mkdir(parents=True, exist_ok=True)
 
-        tdp.run_phonons(dir=ph_dir, ucell=ucell, scell=scell, ifc_file=ifc_file, qgrid=32, dos=True, tdep_bin_directory=None, bin_pref=bin_pref, units='thz')
+        tdp.run_phonons(dir=ph_dir, ucell=ucell, scell=scell, ifc_file=ifc_file, qgrid=64, dos=True, tdep_bin_directory=None, bin_pref=bin_pref, units='thz')
         print(ph_dir.joinpath('outfile.phonon_dos.hdf5'))
         fl = h5py.File(ph_dir.joinpath('outfile.phonon_dos.hdf5'))
         freqs.append(np.array(fl['frequencies']))
