@@ -1244,16 +1244,19 @@ def convergence_tdep_stride_or_sampling_size(stride=True,
         # deal with the sizes
         if size_step is None:
             raise ValueError('sampling_size is True, but you did not provide size_step!')
-        if (nconfs-nthrow) < size_step:
+        if int((nconfs-nthrow)/stride_for_size_conv) < size_step:
             raise ValueError('size_step must be < than the number of confs in the trajectory file!')
         if stride_for_size_conv is None:
             raise ValueError('sampling_size is True, but you did not provide stride_for_size_conv!')
         sizes_dir = conv_dir.joinpath('sampling_size')
         sizes_dir.mkdir(parents=True, exist_ok=True)
         # find sizes (aka indices) to converge w.r.t.
-        indices = [size_step*i for i in range(1, ceil((nconfs-nthrow)/size_step)+1)]
+        actual_max_size =int((nconfs - nthrow - 1) / stride_for_size_conv) + 1
+
+        indices = [size_step*i for i in range(1, int(actual_max_size/size_step))]
+        if actual_max_size % size_step != 0:
+            indices.append(indices[-1] + actual_max_size % size_step)
         # apply stride to indices
-        indices = [ceil(size/stride_for_size_conv) for size in indices]
         for index in indices:
             inst_dir = sizes_dir.joinpath(f'{index}_size')
             inst_dir.mkdir(parents=True, exist_ok=True)
@@ -2306,7 +2309,6 @@ def parse_outfile_forceconstants(filepath, unitcell, supercell):
 
 
 def parse_outfile_forceconstants_3(filepath, unitcell, supercell):
-    
     def find_index_in_unitcell(red_position, unitcell):
         scaled_positions = unitcell.get_scaled_positions()
         return np.argmin(np.linalg.norm(scaled_positions - red_position, axis=1))
@@ -2327,7 +2329,7 @@ def parse_outfile_forceconstants_3(filepath, unitcell, supercell):
     positions = supercell.get_positions() # nats, 3
     positions_red = (np.linalg.inv(cell.T) @ positions.T).T # in unit cell coord
     positions_red[np.abs(positions_red) < 1E-10] = 0
-    atoms_tuples = []
+    atoms_tuples = dict()
     for i, atom in enumerate(supercell):
         frac_part = positions_red[i] % 1 # works for both positive and negative reduced coords!!! e.g. -1.3 % 1 = 0.7, not -0.3
         ind1 = find_index_in_unitcell(frac_part, unitcell)
@@ -2336,8 +2338,8 @@ def parse_outfile_forceconstants_3(filepath, unitcell, supercell):
             frac_part = positions_red[j] % 1 # works for both positive and negative reduced coords!!! e.g. -1.3 % 1 = 0.7, not -0.3
             ind2 = find_index_in_unitcell(frac_part, unitcell)
             repetition_indices2 = [np.floor(positions_red[j][0]).astype(int), np.floor(positions_red[j][1]).astype(int),np.floor(positions_red[j][2]).astype(int)] # again, works for positive and negative numbers, np.floor(-1.3) = -2, not -1!!
-        
-            atoms_tuples.append([(ind1, ind2, *repetition_indices1, *repetition_indices2),(i,j)])
+            tup = (ind1, ind2, *repetition_indices1, *repetition_indices2)
+            atoms_tuples[tup] = (i,j)
         
     # now atoms_tuples is a list of tuples (ind, R1, R2, R3), where ind is the index of the atom in the unitcell and R1/2/3 are the component of the position of the repetition in reduced coordinates
     
@@ -2394,9 +2396,10 @@ def parse_outfile_forceconstants_3(filepath, unitcell, supercell):
             current_tuple = (neigh1_unit_ind, neigh2_unit_ind, *curr_repetition_indices1, *curr_repetition_indices2)
 
             # TO DO: CHECK NEXT LINE!!!!!
-            index = [tuples[0] for tuples in atoms_tuples].index(current_tuple) # find the matching tuple, j is the index of the neighbour in the supercell
-            j = atoms_tuples[index][1][0]
-            p = atoms_tuples[index][1][1]
+            #index = [tuples[0] for tuples in atoms_tuples].index(current_tuple) # find the matching tuple, j is the index of the neighbour in the supercell
+            j, p = atoms_tuples[current_tuple]
+            #j = atoms_tuples[index][1][0]
+            #p = atoms_tuples[index][1][1]
             tens = []
             for m in range(9):
                 tens.append([float(lines[ci1+5+m][0]), float(lines[ci1+5+m][1]), float(lines[ci1+5+m][2])])
@@ -2404,7 +2407,6 @@ def parse_outfile_forceconstants_3(filepath, unitcell, supercell):
             tens = np.array(tens, dtype='float')
             ifc[i,j,p] += tens
         k += 1+15*ntps
-
     return ifc # shape n_atoms_unitcell, n_atoms_supercell, n_atoms_supercell, 9, 3
 
 
@@ -2697,3 +2699,352 @@ def correct_spectralfunction(sp_path):
     cs_denominator = (probe_freqs[None,:]**2 - ph_freqs[:,None]**2 - 2 * ph_freqs[:,None] * (Delta-Delta_0[:,None]))**2 + 4 * ph_freqs[:,None]**2 * Gamma**2  
     cs = cs_numerator / cs_denominator
     return cs, probe_freqs      
+
+def compute_lineshape_single_qpoint(from_infiles = False,
+                      infiles_dir = None,
+                      unitcell = None,
+                      supercell = None,
+                      ifc_filepath = './outfile.forceconstant',
+                      ifc_3_filepath = './outfile.forceconstant_thirdorder',
+                      temperature = None,
+                      qgrid = '64 64 64',
+                      n_energies = 9600,
+                      q_dir_in = '1 0 0',
+                      q_point = '0 0 0',
+                      wdir = './',
+                      bin_prefix = '',
+                      tdep_bin_folder=g_tdep_bin_directory):
+    '''Function to compute the lineshape with TDEP
+    '''
+
+    wdir = Path(wdir)
+    if not wdir.is_dir():
+        wdir.mkdir(parents=True)
+    if from_infiles == False:
+        if unitcell == None or supercell == None:
+            raise ValueError('Since `from_infiles` is False, you must provide a unit cell ad a supercell!')
+        else:
+            write(unitcell, wdir.joinpath('infile.ucposcar'), format='vasp')
+            write(supercell, wdir.joinpath('infile.ssposcar'), format='vasp')
+    else:
+        infiles_dir = Path(infiles_dir) 
+        if not infiles_dir.is_dir(): 
+            raise ValueError(f'The infiles directory {infiles_dir} does not exist!')
+    if temperature is None:
+        raise ValueError('You must provide a value of temperature (in K)!')
+    ln_s_f(infiles_dir.joinpath('infile.ucposcar'), wdir)
+    ln_s_f(infiles_dir.joinpath('infile.ssposcar'), wdir)
+    ln_s_f(Path(ifc_filepath).absolute(), wdir.joinpath('infile.forceconstant'))
+    ln_s_f(Path(ifc_3_filepath).absolute(), wdir.joinpath('infile.forceconstant_thirdorder'))
+    cmd = f'{bin_prefix} {tdep_bin_folder.joinpath("lineshape")} --qpoint_grid {qgrid} --n_energies {n_energies}'
+    cmd += f' --qdirin {q_dir_in} --qpoint {q_point}'
+    print(cmd)
+    logpath = wdir.joinpath('log_lnshp')
+    errpath = wdir.joinpath('err_lnshp')
+    with open(logpath.absolute(), 'w') as log, open(errpath.absolute(), 'w') as err:
+        run(cmd.split(), cwd=wdir, stderr=err, stdout=log)
+
+
+def conv_rc3_extract_ifcs_lnshp(unitcell = None,
+                          supercell = None,
+                          sampling = None,
+                          timestep = 1,
+                          dir = './',
+                          first_order = False,
+                          first_order_rc2 = None,
+                          displ_threshold_firstorder = 0.0001,
+                          max_iterations_first_order = 20,
+                          rc2 = None, 
+                          rc3s = None, 
+                          polar = False,
+                          loto_filepath = None, 
+                          stride = 1, 
+                          temperature = None,
+                          lnshp_grid = 64,
+                          lnshp_n_energies = 9600,
+                          lnshp_qdirin = '1 0 0',
+                          bin_prefix = '',
+                          tdep_bin_directory = None,
+                          ifc_diff_threshold = 0.001, # eV/A^2
+                          ifc_diff_threshold_3 = 0.0001, # eV/A^3
+                          n_rc3_to_average = 4,
+                          conv_criterion_diff = 'avg'): 
+    
+    """Function to extract the IFCs converging them w.r.t. the rc3 values.
+    It is possible to run a first-order TDEP optimisation of the unitcell before extracting the IFCs and it will be done using a rc2
+    specific for this stage (`first_order_rc2` or `rc2)` if the first one is None); no rc3 is used in the first-order optimization.
+    The same optimised unitcell is then used for all the IFCs extractions with the several rc3 (in `rc3s`).
+    The convergence of the IFCs is assessed by evaluating the average differences in the IFCs between the last rc3 value, and the N before,
+    and averaging these N average differences (N = `n_rc3_to_average`).  
+
+    Parameters
+    ----------
+    unitcell : ase.Atoms
+        The unit cell.
+    supercell : ase.Atoms
+        The supercell: must be obtained by repetition of the unitcell via a matrix multiplication!.
+    sampling : list or ASE trajectory
+        The trajectory used for statistical sampling.
+    timestep : float
+        Timestep in fs.
+    dir : str or Path
+        Root directory in which to perform the convergence process.
+    first_order : bool
+        If True, run a first-order TDEP optimization of the unitcell.
+    first_order_rc2 : float or None
+        The rc2 cutoff to be used for the first-order optimization.
+        If None, `rc2` will be used.
+    displ_threshold_firstorder : float
+        Convergence threshold for atomic displacements during first-order optimization (in Ang).
+    max_iterations_first_order : int
+        Maximum number of iterations allowed in the first-order optimization.
+    rc2 : list of float
+        Value of the second-order cutoff radius (in Ang).
+    rc3s: list of float
+        List of third-order cutoff radii (in Ang) to test for convergence.
+    polar : bool
+        Whether to include LO-TO splitting (polar correction).
+    loto_filepath : str or Path
+        Path to the LO-TO splitting file, required if `polar=True`.
+    stride : int
+        Stride for sampling frames in TDEP input generation.
+    temperature : float
+        Temperature (in K).
+    bin_prefix : str
+        Optional prefix to prepend to TDEP binary calls (e.g. "srun -n 4").
+    tdep_bin_directory : str or Path
+        Path to the TDEP binaries.
+    ifc_diff_threshold : float
+        Threshold (in eV/Ang^2) for convergence assessment of the 2nd-order IFCs.
+    ifc_diff_threshold_3 : float
+        Threshold (in eV/Ang^3) for convergence assessment of the 3rd-order IFCs.
+    n_rc3_to_average : int
+        Number of previous `rc3` IFCs to average over for convergence assessment.
+    conv_criterion_diff : str
+        Criterion for convergence: 'avg' for average difference, 'max' for max difference.
+
+    Returns
+    -------
+    float
+        The value of `rc3` (from `rc3s`) at which the IFCs are considered converged.
+        If convergence is not reached, returns the last rc3 value tested.
+
+    Raises
+    ------
+    ValueError
+        If input consistency checks fail (e.g., too few rc3s, invalid convergence criterion).
+    
+    Notes
+    -----
+    - IFCs are extracted in subfolders named `rc3_<value>` under the main `dir`.
+    - A convergence plot (avg/max IFC error vs rc3) is saved as `Convergence.png`.
+    - All generated input files are stored in the `infiles` subdirectory.
+    - If `first_order=True`, the optimized unitcell is reused for all `rc3` values.
+    """
+    print_kb('**** IFCs convergence with respect to the 3rd-order cutoff ****')
+
+    dir = Path(dir)
+    if not dir.is_dir():
+        dir.mkdir(parents=True, exist_ok=True)
+
+    infiles_dir = dir.joinpath('infiles')
+    infiles_dir.mkdir(parents=True, exist_ok=True)
+    write(infiles_dir.joinpath('infile.ucposcar'), unitcell, format='vasp')
+    write(infiles_dir.joinpath('infile.ssposcar'), supercell, format='vasp')
+    make_stat(sampling, infiles_dir)
+    make_meta(sampling, infiles_dir, timestep=timestep, temp=100)
+    make_forces(sampling, infiles_dir)
+    make_positions(sampling, infiles_dir)
+
+    if conv_criterion_diff not in ['avg', 'max']:
+        raise ValueError('conv_criterion_diff must be either \'avg\' or \'max\'!')
+    
+    if len(rc3s) <= n_rc3_to_average:
+        raise ValueError(f'You asked to assess the convergence by averaging the last {n_rc3_to_average} extractions, but you provided less than {n_rc3_to_average} + 1 values of rc3!')
+    
+    if first_order == True:
+        if first_order_rc2 == None:
+            first_order_rc2 = rc2
+            print_b('You asked for the first-order TDEP optimization of the unitcell; it will be done using the rc2 you provided.')
+        else:
+            print_b(f'You asked for the first-order TDEP optimization of the unitcell; it will be done using the rc2 value you provided for this stage ({first_order_rc2} Angstroms).')
+        
+        fo_dir = dir.joinpath('first_order_optimisation')
+        optimised_ucell, optimised_scell, converged = first_order_optimization(from_infiles = False,
+                                                   unitcell = unitcell,
+                                                   supercell = supercell,
+                                                   sampling = sampling,
+                                                   timestep = timestep,
+                                                   dir = fo_dir,
+                                                   displ_threshold_firstorder = displ_threshold_firstorder,
+                                                   max_iterations_first_order = max_iterations_first_order,
+                                                   rc2 = first_order_rc2,
+                                                   polar = polar,
+                                                   loto_filepath = loto_filepath,
+                                                   stride = stride,
+                                                   temperature = temperature,
+                                                   bin_prefix = bin_prefix,
+                                                   tdep_bin_directory = tdep_bin_directory)
+        if converged == False:
+            print(colored('The first-order optimization did not converge. However, the last unitcell generated in the process will be used.', 'yellow'))
+        unitcell = optimised_ucell
+        supercell = optimised_scell
+        ln_s_f(fo_dir.joinpath(f'optimized_unitcell.poscar'), infiles_dir.joinpath('infile.ucposcar'))
+        ln_s_f(fo_dir.joinpath(f'optimized_supercell.poscar'), infiles_dir.joinpath('infile.ssposcar'))
+
+    print('Starting the extraction for each rc3 value')
+
+    ifcs = []
+    ifcs_3 = []
+    for i_rc3, rc3 in enumerate(rc3s):
+        print_b(f'+++ rc3 = {rc3} Angstroms +++')
+        rc3_dir = dir.joinpath(f'rc3_{rc3}')
+        rc3_dir.mkdir(parents=True, exist_ok=True)
+        extract_ifcs(from_infiles = True,
+                infiles_dir = infiles_dir,
+                unitcell = None, # no need
+                supercell = None, # no need
+                sampling = None, # no need
+                timestep = timestep,
+                dir = rc3_dir,
+                first_order = False,
+                displ_threshold_firstorder = None,
+                max_iterations_first_order = None,
+                rc2 = rc2, 
+                rc3 = rc3, 
+                polar = polar,
+                loto_filepath = loto_filepath, 
+                stride = stride, 
+                temperature = temperature,
+                bin_prefix = bin_prefix,
+                tdep_bin_directory = tdep_bin_directory)
+        
+        #new_ifcs = parse_outfile_forceconstants(rc3_dir.joinpath('outfile.forceconstant'), unitcell, supercell) # shape: n_atoms_ucell, n_atoms_scell, 3, 3
+        #ifcs.append(new_ifcs) 
+
+        #new_ifcs_3 =  parse_outfile_forceconstants_3(rc3_dir.joinpath('outfile.forceconstant_thirdorder'), unitcell, supercell) # shape: n_atoms_ucell, n_atoms_scell, n_atoms_scell, 9, 3
+        #ifcs_3.append(new_ifcs_3)
+        
+        # LINESHAPE
+        lnshp_grid = ' '.join([str(lnshp_grid) for i in range(3)])
+        cmd = f'{bin_prefix} {tdep_bin_directory.joinpath("lineshape")} --temperature {temperature} --qpoint_grid {lnshp_grid} --n_energies {lnshp_n_energies} --qdirin {lnshp_qdirin}'
+        log_lnshp = rc3_dir.joinpath('log_lnshp')
+        err_lnshp = rc3_dir.joinpath('err_lnshp')
+
+        with open(log_lnshp.absolute(), 'w') as log, open(err_lnshp.absolute(), 'w') as err:
+            run(cmd.split(), cwd=rc3_dir.absolute(), stdout=log, stderr=err)
+
+        lnshp = correct_spectralfunction(rc3_dir.joinpath('outfile.phonon_self_energy.hdf5'))
+
+
+        converged = False
+        if i_rc3 >= n_rc3_to_average:
+            print('Assessing the convergence')
+            cifcs = np.array(ifcs.copy()) # "c" stands for copy; shape: n_rc3_done, n_atoms_ucell, n_atoms_scell, 3, 3
+            diffss = np.abs(cifcs[-1][np.newaxis,:] - cifcs[-1-n_rc3_to_average:-1]) # shape: n_rc3_to_average, n_atoms_ucell, n_atoms_scell, 3, 3
+            weights = np.abs(cifcs[-1][np.newaxis,:]) + np.abs(cifcs[-1-n_rc3_to_average:-1])
+            avg_diffss = (diffss * weights / weights.sum()).sum(axis=(1,2,3,4)) # shape: n_rc3_to_average
+            avg_avg_diff = np.mean(avg_diffss)
+            max_diffss = np.max(diffss, axis=(1,2,3,4)) # shape: n_rc3_to_average
+            avg_max_diff = np.mean(max_diffss)
+
+            cifcs_3 = np.array(ifcs_3.copy()) # "c" stands for copy; shape: n_rc3_done, n_atoms_ucell, n_atoms_scell, 3, 3
+            diffss_3 = np.abs(cifcs_3[-1][np.newaxis,:] - cifcs_3[-1-n_rc3_to_average:-1]) # shape: n_rc3_to_average, n_atoms_ucell, n_atoms_scell, 3, 3
+            weights_3 = np.abs(cifcs_3[-1][np.newaxis,:]) + np.abs(cifcs_3[-1-n_rc3_to_average:-1])
+            avg_diffss_3 = (diffss_3 * weights_3 / weights_3.sum()).sum(axis=(1,2,3,4)) # shape: n_rc3_to_average
+            avg_avg_diff_3 = np.mean(avg_diffss_3)
+            max_diffss_3 = np.max(diffss_3, axis=(1,2,3,4)) # shape: n_rc3_to_average
+            avg_max_diff_3 = np.mean(max_diffss_3)
+
+
+
+            
+            if conv_criterion_diff == 'avg':
+                value_to_compare_txt = 'average'
+                value_to_compare = avg_avg_diff
+                value_to_compare_3 = avg_avg_diff_3
+            elif conv_criterion_diff == 'max':
+                value_to_compare_txt = 'maximum'
+                value_to_compare = avg_max_diff
+                value_to_compare_3 = avg_max_diff_3
+            
+            print(f'Maximum difference in the 2nd-order IFCs, averaged over the last {n_rc3_to_average} extractions: {avg_max_diff} eV/Angstrom^2')
+            print(f'Average difference in the 2nd-order IFCs, averaged over the last {n_rc3_to_average} extractions: {avg_avg_diff} eV/Angstrom^2')
+
+            print(f'Maximum difference in the 3rd-order IFCs, averaged over the last {n_rc3_to_average} extractions: {avg_max_diff_3} eV/Angstrom^2')
+            print(f'Average difference in the 3rd-order IFCs, averaged over the last {n_rc3_to_average} extractions: {avg_avg_diff_3} eV/Angstrom^2')
+
+            if value_to_compare < ifc_diff_threshold and value_to_compare_3 < ifc_diff_threshold_3:
+                text = colored(f'Since {value_to_compare_txt} = {value_to_compare} < {ifc_diff_threshold} (ev/Angstrom^2),\n ', 'green')
+                text = colored(f'and {value_to_compare_txt} = {value_to_compare} < {ifc_diff_threshold} (ev/Angstrom^2),\n ', 'green')
+                text += colored(f'the IFCs can be considered converged with rc2 = {rc2} and rc3 = {rc3} Angstroms!', 'green', attrs=['bold'])
+                print(text)
+                converged = True
+                i_conv = i_rc3
+                break
+
+        else:
+            if i_rc3 + 1 == 1:
+                print(f'Skipping the convergence assessment, as only {i_rc3+1} rc3 value has been done and we need to average over {n_rc3_to_average} extractions')
+            else:    
+                print(f'Skipping the convergence assessment, as only {i_rc3+1} rc3 values have been done and we need to average over {n_rc3_to_average} extractions')
+
+    if converged == False:
+        print_rb(f'The IFC did not converge! You probably need bigger values of rc3!')
+
+    ifcs = np.array(ifcs)
+    ifcs_3 = np.array(ifcs_3)
+    # let's save the ifcs somewhere, so that they can be analyzed in the future
+    expl = 'This pickle file contains the results of the convergence of IFCs w.r.t. rc3. There are four variables:\n1. this explanatory variabe\n'
+    expl += '2. the list ifcs of shape (n_rc3s,natoms_unit, natoms_super, 3, 3) in eV/Angst^2\n3. the list 3rd-order ifcs of shape '
+    expl += '(n_rc3s,natoms_unit, natoms_super, natoms_super, 9, 3) in eV/Angst^3\n4. the list of rc3s.'
+    results = [expl, ifcs, ifcs_3, rc3s[:i_rc3+1]]
+    with open(dir.joinpath('conv_rc3_results.pkl'), 'wb') as fl:
+        pkl.dump(results, fl)
+    
+    last_ifc_path = dir.joinpath(f'rc3_{rc3s[i_rc3]}/outfile.forceconstant') # this might be converged or not, but it's the last made
+    diffs = np.abs(ifcs[1:] - ifcs[:-1])
+    weights = np.abs(ifcs[1:]) + np.abs(ifcs[:-1])    
+    max_diffs = np.max(diffs,axis=(1,2,3,4))
+    avg_diffs = (diffs * weights / weights.sum()).sum(axis=(1,2,3,4))
+
+    last_ifc_path_3 = dir.joinpath(f'rc3_{rc3s[i_rc3]}/outfile.forceconstant_thirdorder') # this might be converged or not, but it's the last made
+    diffs_3 = np.abs(ifcs_3[1:] - ifcs_3[:-1])
+    weights_3 = np.abs(ifcs_3[1:]) + np.abs(ifcs_3[:-1])    
+    max_diffs_3 = np.max(diffs_3,axis=(1,2,3,4))
+    avg_diffs_3 = (diffs_3 * weights_3 / weights_3.sum()).sum(axis=(1,2,3,4))
+
+    Fig = plt.figure(figsize=(15,4))
+    Fig.add_subplot(2,2,1)
+    plt.plot(rc3s[1:i_rc3+1], max_diffs, '.')
+    plt.title('2nd-order IFC convergence: max abs. error')
+    plt.ylabel('Error on the IFCs (eV/$\mathrm{\AA}^2$)')
+    plt.xlabel('rc3 ($\mathrm{\AA}$)')
+    
+    Fig.add_subplot(2,2,2)
+    plt.plot(rc3s[1:i_rc3+1], avg_diffs, '.')
+    plt.title('2nd-order IFC convergence: avg abs. error')
+    plt.ylabel('Error on the IFCs (eV/$\mathrm{\AA}^2$)')
+    plt.xlabel('rc3 ($\mathrm{\AA}$)')
+
+    Fig = plt.figure(figsize=(15,4))
+    Fig.add_subplot(2,2,3)
+    plt.plot(rc3s[1:i_rc3+1], max_diffs_3, '.')
+    plt.title('3rd-order IFC convergence: max abs. error')
+    plt.ylabel('Error on the IFCs (eV/$\mathrm{\AA}^3$)')
+    plt.xlabel('rc3 ($\mathrm{\AA}$)')
+    
+    Fig.add_subplot(2,2,4)
+    plt.plot(rc3s[1:i_rc3+1], avg_diffs_3, '.')
+    plt.title('3rd-IFC convergence: avg abs. error')
+    plt.ylabel('Error on the IFCs (eV/$\mathrm{\AA}^3$)')
+    plt.xlabel('rc3 ($\mathrm{\AA}$)')
+    
+    figpath = dir.joinpath(f'Convergence.png')
+    plt.savefig(fname=figpath, bbox_inches='tight', dpi=600, format='png')
+    
+    return rc3s[i_rc3], i_rc3, last_ifc_path, last_ifc_path_3, converged
+
+
+
+
