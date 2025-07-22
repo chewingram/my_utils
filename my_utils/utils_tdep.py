@@ -15,6 +15,9 @@ from copy import deepcopy as cp
 from termcolor import colored
 import pickle as pkl
 from random import shuffle
+from math import ceil
+
+
 
 binpath = shutil.which('extract_forceconstants')
 if binpath is not None:
@@ -1251,16 +1254,16 @@ def convergence_tdep_stride_or_sampling_size(stride=True,
         sizes_dir = conv_dir.joinpath('sampling_size')
         sizes_dir.mkdir(parents=True, exist_ok=True)
         # find sizes (aka indices) to converge w.r.t.
-        actual_max_size =int((nconfs - nthrow - 1) / stride_for_size_conv) + 1
+        actual_max_size = ceil((nconfs - nthrow) / stride_for_size_conv)
 
-        indices = [size_step*i for i in range(1, int(actual_max_size/size_step))]
+        indices = [size_step*i for i in range(1, int(actual_max_size/size_step)+1)]
         if actual_max_size % size_step != 0:
             indices.append(indices[-1] + actual_max_size % size_step)
         # apply stride to indices
         for index in indices:
             inst_dir = sizes_dir.joinpath(f'{index}_size')
             inst_dir.mkdir(parents=True, exist_ok=True)
-            lines[index_index] = f"index = {ceil(index/stride_for_size_conv)}\n"
+            lines[index_index] = f"index = {index}\n"
             lines[index_wdir] = f"wdir = '{inst_dir.absolute()}'\n"
             lines[index_stride] = f"stride = {stride_for_size_conv}\n"
             with open(inst_dir.joinpath('RunTdep.py'), 'w') as fl:
@@ -1632,7 +1635,6 @@ def extract_ifcs(from_infiles = False,
 
     if from_infiles == True:
         ln_s_f(src_infiles_dir.joinpath('infile.ucposcar'), dir)
-        os.system(f'ls {dir}')
         ln_s_f(src_infiles_dir.joinpath('infile.ssposcar'), dir)
         ln_s_f(src_infiles_dir.joinpath('infile.meta'), dir)
         ln_s_f(src_infiles_dir.joinpath('infile.stat'), dir)
@@ -1649,6 +1651,8 @@ def extract_ifcs(from_infiles = False,
         make_positions(sampling, dir)
 
     if polar == True:
+        if dir.joinpath('infile.lotosplitting').is_symlink():
+            dir.joinpath('infile.lotosplitting').unlink()
         ln_s_f(loto_filepath, dir.joinpath('infile.lotosplitting'))
     
     if first_order == True:
@@ -1943,6 +1947,88 @@ def conv_rc2_extract_ifcs(unitcell = None,
     
     return rc2s[i_rc2], i_rc2, last_ifc_path, converged
 #    return first_converged, max_diffs, avg_diffs
+
+def rc3_ifcs_batch(unitcell = None,
+                   supercell = None,
+                   sampling = None,
+                   timestep = 1,
+                   dir = './',
+                   first_order = False,
+                   first_order_rc2 = None,
+                   displ_threshold_firstorder = 0.0001,
+                   max_iterations_first_order = 20,
+                   rc2 = None,
+                   rc3s = None,
+                   polar = False,
+                   loto_filepath = None,
+                   stride = 1,
+                   temperature = None,
+                   bin_prefix = None,
+                   tdep_bin_directory = g_tdep_bin_directory):
+    
+
+    dir = Path(dir)
+    if not dir.is_dir():
+        dir.mkdir(parents=True, exist_ok=True)
+    infiles_dir = dir.joinpath('infiles')
+    if not infiles_dir.is_dir():
+        infiles_dir.mkdir(parents=True)
+
+    if first_order == True:
+        if first_order_rc2 == None:
+            first_order_rc2 = rc2
+            print_b('You asked for the first-order TDEP optimization of the unitcell; it will be done using the rc2 you provided.')
+        else:
+            print_b(f'You asked for the first-order TDEP optimization of the unitcell; it will be done using the rc2 value you provided for this stage ({first_order_rc2} Angstroms).')
+        
+        fo_dir = dir.joinpath('first_order_optimisation')
+        optimised_ucell, optimised_scell, converged = first_order_optimization(from_infiles = False,
+                                                   unitcell = unitcell,
+                                                   supercell = supercell,
+                                                   sampling = sampling,
+                                                   timestep = timestep,
+                                                   dir = fo_dir,
+                                                   displ_threshold_firstorder = displ_threshold_firstorder,
+                                                   max_iterations_first_order = max_iterations_first_order,
+                                                   rc2 = first_order_rc2,
+                                                   polar = polar,
+                                                   loto_filepath = loto_filepath,
+                                                   stride = stride,
+                                                   temperature = temperature,
+                                                   bin_prefix = bin_prefix,
+                                                   tdep_bin_directory = tdep_bin_directory)
+        if converged == False:
+            print(colored('The first-order optimization did not converge. However, the last unitcell generated in the process will be used.', 'yellow'))
+        unitcell = optimised_ucell
+        supercell = optimised_scell
+        ln_s_f(fo_dir.joinpath(f'optimized_unitcell.poscar'), infiles_dir.joinpath('infile.ucposcar'))
+        ln_s_f(fo_dir.joinpath(f'optimized_supercell.poscar'), infiles_dir.joinpath('infile.ssposcar'))
+
+    for rc3 in rc3s:
+        rc3_dir = dir.joinpath(f'rc3_{rc3}')
+        rc3_dir.mkdir(parents=True, exist_ok=True)
+        extract_ifcs(from_infiles = False,
+                    infiles_dir = infiles_dir,
+                    unitcell = unitcell, # no need
+                    supercell = supercell, # no need
+                    sampling = sampling, # no need
+                    timestep = timestep,
+                    dir = rc3_dir,
+                    first_order = False,
+                    displ_threshold_firstorder = None,
+                    max_iterations_first_order = None,
+                    rc2 = rc2, 
+                    rc3 = rc3, 
+                    polar = polar,
+                    loto_filepath = loto_filepath, 
+                    stride = stride, 
+                    temperature = temperature,
+                    bin_prefix = bin_prefix,
+                    tdep_bin_directory = tdep_bin_directory)
+
+
+
+
 
 def conv_rc3_extract_ifcs(unitcell = None,
                           supercell = None,
@@ -3044,7 +3130,4 @@ def conv_rc3_extract_ifcs_lnshp(unitcell = None,
     plt.savefig(fname=figpath, bbox_inches='tight', dpi=600, format='png')
     
     return rc3s[i_rc3], i_rc3, last_ifc_path, last_ifc_path_3, converged
-
-
-
 
