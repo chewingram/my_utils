@@ -1171,6 +1171,7 @@ def convergence_tdep_stride_or_sampling_size(stride=True,
                                              ts = 1,
                                              size_step=None,
                                              stride_for_size_conv=1,
+                                             min_size=1,
                                              max_stride=None,
                                              stride_step=None,
                                              uc_path = 'unitcell.json',
@@ -1243,6 +1244,8 @@ def convergence_tdep_stride_or_sampling_size(stride=True,
         ats = ats[:traj_size]
     nconfs = len(ats)
 
+    if min_size != None:
+        min_size -= 1
     if sampling_size == True:
         # deal with the sizes
         if size_step is None:
@@ -1259,6 +1262,7 @@ def convergence_tdep_stride_or_sampling_size(stride=True,
         indices = [size_step*i for i in range(1, int(actual_max_size/size_step)+1)]
         if actual_max_size % size_step != 0:
             indices.append(indices[-1] + actual_max_size % size_step)
+        indices = [x for x in indices if x >= min_size]
         # apply stride to indices
         for index in indices:
             inst_dir = sizes_dir.joinpath(f'{index}_size')

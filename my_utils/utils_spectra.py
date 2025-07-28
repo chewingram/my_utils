@@ -74,6 +74,72 @@ def sum_operation(args):
 def boh(args):
     return args[0] + 3* (args[1])
 
+def fwhm_finder(x, y, x_peak=None, plot=False):
+    """
+    Estimate the Full Width at Half Maximum (FWHM) of a single peak in a spectrum.
+
+    Parameters
+    ----------
+    x : array_like
+        Array of x values (e.g., frequency or energy).
+    y : array_like
+        Array of y values (e.g., intensity).
+    x_peak : float, optional
+        x position of the peak. If None, the global maximum is used.
+    plot : bool
+        If True, plot the spectrum and mark the FWHM range.
+
+    Returns
+    -------
+    fwhm : float
+        Full Width at Half Maximum.
+    x_l : float
+        x position of the left half-maximum.
+    x_r : float
+        x position of the right half-maximum.
+    """
+
+    x = np.asarray(x)
+    y = np.asarray(y)
+
+    if x_peak is None:
+        idx_peak = np.argmax(y)
+    else:
+        idx_peak = np.argmin(np.abs(x - x_peak))
+
+    y_half = y[idx_peak] / 2.0
+
+    # Search to the left
+    i_left = np.where(y[:idx_peak] < y_half)[0]
+    if len(i_left) == 0:
+        raise ValueError("No left crossing found.")
+    i_l = i_left[-1]
+    x_l = np.interp(y_half, [y[i_l], y[i_l + 1]], [x[i_l], x[i_l + 1]])
+
+    # Search to the right
+    i_right = np.where(y[idx_peak + 1:] < y_half)[0]
+    if len(i_right) == 0:
+        raise ValueError("No right crossing found.")
+    i_r = i_right[0] + idx_peak + 1
+    x_r = np.interp(y_half, [y[i_r - 1], y[i_r]], [x[i_r - 1], x[i_r]])
+
+    fwhm = x_r - x_l
+
+    if plot:
+        plt.plot(x, y, label="Spectrum")
+        plt.axvline(x_l, color='red', linestyle='--', label="Half max bounds")
+        plt.axvline(x_r, color='red', linestyle='--')
+        plt.axhline(y_half, color='gray', linestyle=':')
+        plt.scatter([x[idx_peak]], [y[idx_peak]], color='black', label="Peak")
+        plt.title(f"FWHM = {fwhm:.4f}")
+        plt.legend()
+        plt.xlabel("x")
+        plt.ylabel("y")
+        plt.grid(True)
+        plt.show()
+
+    return fwhm, i_l, i_r
+
 def peak_finder(x, ref_yy, n_peaks=None):
     """
     Identify peaks in the signal and return their indices, x, and y values.
@@ -100,7 +166,7 @@ def peak_finder(x, ref_yy, n_peaks=None):
     crit_list = [[i, x[i], ref_yy[i]] for i in idxs]
     return np.array(crit_list)
     
-def fwhm_finder(x, ref_yy, x_max):
+def old_fwhm_finder(x, ref_yy, x_max):
     """
     Estimate the full width at half maximum (FWHM) around a given x_max.
 
