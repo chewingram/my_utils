@@ -1705,7 +1705,7 @@ def extract_ifcs(from_infiles = False,
     print(f'\tStride: ' +colored(f'{stride}', 'blue'))
     
     cmd = f'{bin_prefix} {tdep_bin_directory.joinpath("extract_forceconstants")} {rc2_cmd} {rc3_cmd} {temperature_cmd} {polar_cmd} {stride_cmd}'
-
+    print(f'Command: {cmd}')
     logpath = dir.joinpath('log_ifc')
     errpath = dir.joinpath('err_ifc')
     with open(logpath.absolute(), 'w') as log, open(errpath.absolute(), 'w') as err:

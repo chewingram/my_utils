@@ -21,13 +21,12 @@ from random import shuffle
 
 
 
-p = Path(shutil.which('extract_forceconstants')).parent
-if p != None:
-    tdp_bin_dir = p
+binpath = shutil.which('extract_forceconstants')
+if binpath is not None:
+    g_tdep_bin_directory = Path(binpath).parent.absolute()
 else:
-    tdp_bin_dir = Path('./')
-#print(f'tdp bin path: {tdp_bin_dir.absolute()}')
-    
+    g_tdep_bin_directory = Path('./').absolute()
+
 class logger():
     def __init__(self, filepath):
         self.filepath = Path(filepath)
@@ -166,7 +165,7 @@ def old_run_stdep(root_dir=Path('./').absolute(),
               thr=0.00001,
               mlp_bin_path=None,
               mlp_pot_path = None,
-              tdp_bin_dir = tdp_bin_dir):
+              tdp_bin_dir = g_tdep_bin_directory):
     '''
     Function to run the s-dtep algorithm.
     Args:
@@ -1229,3 +1228,92 @@ def conv_iters_and_sizes(size_dirs, size_labels, outimage_path='./Convergence_wr
                 print(f'\t\t{iter_dir.name} - incomplete (ignored)')
         conv_iterations(root_dir=size_dir, nconfs=nconfs, iters_dir=iters_dir, verbose=False)
     conv_sizes(size_folders=size_dirs, labels=size_labels, tdep_bin_directory=None, bin_pref=bin_pref, outimage_path=outimage_path)
+
+
+def convergence_stdep_iters(temperature=0,
+                            root_dir='./',
+                            tdep_bin_directory = Path(g_tdep_bin_directory),
+                            bin_prefix = '',
+                            first_order = True,
+                            displ_threshold_firstorder = 0.0001,
+                            max_iterations_first_order = 20,    
+                            rc2 = 10,
+                            rc3 = 5,
+                            ts = 1,
+                            mult_mat = [[1,0,0],[0,1,0],[0,0,1]],
+                            polar = False,
+                            loto_filepath = None,
+                            job=False,
+                            job_template=None):
+
+    
+    template = Path(__file__).parent.joinpath('data/conv_stdep/Run_stdep_template.py')
+    with open(template, 'r') as fl:
+        lines = fl.readlines()
+
+    index_wdir = None
+    
+    for i in range(26):
+        if '$wdir$' in lines[i]:
+            lines[i] = f"wdir = './'\n" # just to note where the wdir line is in the file
+        elif '$tdep_bin_directory$' in lines[i]:
+            lines[i] = f"tdep_bin_directory = '{tdep_bin_directory.absolute()}'"
+        elif '$bin_prefix$' in lines[i]:
+            lines[i] = f'bin_prefix = \'{bin_prefix}\''
+        elif '$rc2$' in lines[i]:
+            lines[i] = f'rc2 = {rc2}'
+        elif '$rc3$' in lines[i]:
+            lines[i] = f'rc3 = {rc3}'
+        elif '$ts$' in lines[i]:
+            lines[i] = f'ts = {ts}'
+        elif '$traj_path$' in lines[i]:
+            index_traj = i
+        elif '$uc_path$' in lines[i]:
+            index_ucell = i
+        elif '$mult_mat$' in lines[i]:
+            lines[i] = f'mult_mat = [[{mult_mat[0][0]}, {mult_mat[0][1]}, {mult_mat[0][2]}], '
+            lines[i] += f'[{mult_mat[1][0]}, {mult_mat[1][1]}, {mult_mat[1][2]}], '
+            lines[i] += f'[{mult_mat[2][0]}, {mult_mat[2][1]}, {mult_mat[2][2]}]]'
+        elif '$temperature$' in lines[i]:
+            lines[i] = f'temperature = {temperature}'
+        elif '$polar$' in lines[i]:
+            lines[i] = f'polar = {polar}'
+        elif '$loto_filepath$' in lines[i]:
+            lines[i] = f'loto_filepath = "{Path(loto_filepath).absolute()}"'
+        elif '$first_order$' in lines[i]:
+            lines[i] = f'first_order = {first_order}'
+        elif '$displ_threshold_firstorder$' in lines[i]:
+            lines[i] = f'displ_threshold_firstorder = {displ_threshold_firstorder}'
+        elif '$max_iterations_first_order$' in lines[i]:
+            lines[i] = f'max_iterations_first_order = {max_iterations_first_order}'
+        else:
+            continue
+        lines[i] += '\n'
+
+    root_dir = Path(root_dir)
+    root_dir.mkdir(parents=True, exist_ok=True)
+
+    iters_dir = root_dir.joinpath('iterations')
+    iter_dirs = [x for x in iters_dir.glob('iter_*')]
+    #iters = [int(x) for x in iter_dirs] # unused
+    true_props_dirs = [iter_dir.joinpath('true_props') for iter_dir in iter_dirs]
+    
+    for i_i, iter_dir in enumerate(iter_dirs):
+        wdir = iter_dir.joinpath('ifcs_for_convergence')
+        wdir.mkdir(parents=True, exist_ok=True)
+
+        ucell_path = true_props_dirs[i_i].joinpath('infile.ucposcar')
+        traj_path = true_props_dirs[i_i].joinpath('new_confs_computed.traj')
+
+        lines[index_ucell] = f"uc_path = '{ucell_path.absolute()}'\n"
+        lines[index_traj] = lines[i] = f"traj_path = '{traj_path.absolute()}'\n"
+
+
+        with open(wdir.joinpath('RunTdep.py'), 'w') as fl:
+                fl.writelines(lines)
+        if job == True:
+            shutil.copy(Path(job_template).absolute(), wdir)
+            run(f'sbatch {Path(job_template).name}', cwd=wdir, shell=True)
+
+        
+
