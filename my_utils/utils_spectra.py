@@ -97,7 +97,7 @@ def fwhm_finder(x, y, i_x_peak,low_bnd, high_bnd):
         This should be chosen to exclude nearby peaks or noise. Choose this carefully!!
     high_bnd : float
         Upper bound of the x-range to consider for FWHM calculation. 
-        The peak must be monotonically increasing between the maximum and this value.
+        The peak must be monotonically decreasing between the maximum and this value.
         This should be chosen to exclude nearby peaks or noise. Choose this carefully!!
 
     Returns
