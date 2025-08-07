@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 from .utils import repeat
 from scipy.signal import find_peaks, peak_widths
+from scipy.interpolate import interp1d
 
 def gaussian_2D(x, pref, mean, std):
     if isinstance(x, list):
@@ -123,7 +124,7 @@ def fwhm_finder(x, y, i_x_peak,low_bnd, high_bnd):
     - Intended for inverted peaks (peaks that point downward), but works with standard
       peaks as well if the sides are monotonic and the peak is prominent.
     '''
-    from scipy.interpolate import interp1d
+    
     y_peak = y[i_x_peak]
     x_peak = x[i_x_peak]
     
