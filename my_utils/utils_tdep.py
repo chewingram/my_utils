@@ -2013,9 +2013,9 @@ def rc3_ifcs_batch(unitcell = None,
         rc3_dir.mkdir(parents=True, exist_ok=True)
         extract_ifcs(from_infiles = False,
                     infiles_dir = infiles_dir,
-                    unitcell = unitcell, # no need
-                    supercell = supercell, # no need
-                    sampling = sampling, # no need
+                    unitcell = unitcell,
+                    supercell = supercell,
+                    sampling = sampling,
                     timestep = timestep,
                     dir = rc3_dir,
                     first_order = False,

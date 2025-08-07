@@ -645,9 +645,6 @@ def chemform():
     print(ats[0].get_chemical_formula())
 
 def wrap(*args):
-    def modified_decimal_part(arr):
-        decimal_part = np.abs(arr) - np.floor(np.abs(arr))  # Compute decimal part
-        return np.where(arr >= 0, decimal_part, 1 - decimal_part)  # Apply transformation
     
     if len(sys.argv) < 2:
         fpath = 'Trajectory.traj'
@@ -655,12 +652,7 @@ def wrap(*args):
         fpath = sys.argv[1] 
     fpath = Path(fpath)
     ats = read(fpath, index=':')
-    new_ats = []
-    for at in ats:
-        cell = at.get_cell()
-        pos = at.get_scaled_positions()
-        new_pos = modified_decimal_part(pos)    
-        at.set_scaled_positions(new_pos)
+    [at.wrap() for at in ats]
     parent = fpath.parent
     fname = 'w_' + fpath.name
     write(parent.joinpath(fname), ats)
