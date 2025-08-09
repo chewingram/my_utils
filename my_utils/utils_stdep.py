@@ -619,10 +619,8 @@ def launch_stdep(root_dir: str = './',
         undone_prev_iters = []
         for prev_iter in prev_iters:
             iter_dir = iters_dir.joinpath(f'iter_{prev_iter}')
-            ifc_log_path = iter_dir.joinpath('ifc_log')
-            with open(ifc_log_path, 'r') as fl:
-                lines = fl.readlines()
-            if any(['Done in' in line for line in lines]):
+            confs_dir = iter_dir.joinpath('true_props/new_confs_computed.traj')
+            if confs_dir.is_file():
                 done_prev_iters.append(prev_iter)
             else:
                 undone_prev_iters.append(prev_iter)
