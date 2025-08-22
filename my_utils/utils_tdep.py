@@ -1655,9 +1655,12 @@ def extract_ifcs(from_infiles = False,
         make_positions(sampling, dir)
 
     if polar == True:
-        if dir.joinpath('infile.lotosplitting').is_symlink():
-            dir.joinpath('infile.lotosplitting').unlink()
-        ln_s_f(loto_filepath, dir.joinpath('infile.lotosplitting'))
+        if loto_filepath.parent.resolve() == dir.resolve():
+            pass # in this case the loto file is already in the correct directory, we MUSTN'T overwrite it.
+        else:
+            if dir.joinpath('infile.lotosplitting').is_symlink():
+                dir.joinpath('infile.lotosplitting').unlink()
+            ln_s_f(loto_filepath, dir.joinpath('infile.lotosplitting'))
     
     if first_order == True:
         print_b('You asked for the first-order TDEP optimization of the unitcell; it will be done using the value of rc2 you provided.')

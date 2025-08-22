@@ -76,68 +76,19 @@ def boh(args):
     return args[0] + 3* (args[1])
 
 def fwhm_finder(x, y, i_x_peak,low_bnd, high_bnd):
-    '''
-    Compute the Full Width at Half Maximum (FWHM) of a peak in a 1D spectrum.
-
-    The function identifies the width of a peak at half its maximum height
-    by linearly interpolating both the left and right sides of the peak within
-    a specified frequency (or x-axis) range. It returns the FWHM and the 
-    corresponding left and right x-values at half maximum.
-
-    Parameters
-    ----------
-    x : array-like
-        1D array of x-values (e.g., frequencies or energies).
-    y : array-like
-        1D array of y-values (e.g., intensities or spectral values).
-    i_x_peak : int
-        Index in `x` (and `y`) corresponding to the peak maximum.
-    low_bnd : float
-        Lower bound of the x-range to consider for FWHM calculation. 
-        The peak must be monotonically increasing between this value and the maximum.
-        This should be chosen to exclude nearby peaks or noise. Choose this carefully!!
-    high_bnd : float
-        Upper bound of the x-range to consider for FWHM calculation. 
-        The peak must be monotonically decreasing between the maximum and this value.
-        This should be chosen to exclude nearby peaks or noise. Choose this carefully!!
-
-    Returns
-    -------
-    fwhm : float
-        Full Width at Half Maximum of the peak.
-    l_x : float
-        x-value at the left side of the peak corresponding to the half maximum.
-    r_x : float
-        x-value at the right side of the peak corresponding to the half maximum.
-
-    Raises
-    ------
-    AssertionError
-        If the left side is not monotonically decreasing or the right side 
-        is not monotonically decreasing from the peak (i.e., malformed peak shape).
-
-    Notes
-    -----
-    - The function assumes a single, symmetric, well-behaved peak within the 
-      specified bounds.
-    - The interpolation is done with `interp1d`, treating x as a function of y.
-    - Intended for inverted peaks (peaks that point downward), but works with standard
-      peaks as well if the sides are monotonic and the peak is prominent.
-    '''
-    
     y_peak = y[i_x_peak]
     x_peak = x[i_x_peak]
     
     
     # as first thing we compute the half maximum
     hm = y_peak / 2.0
+
     
     # now we need to interpolate the two sides of the inverted peak, that is frequency as a function of intensity
     
         # 1. define the scope the of the peak; we must be sure to include [x_l, x_r], where x_l and x_r are the actual positions associated
         #    to the half maximum. We cannot be too conservative ([x_l - N, x_r + N] with huge N) because in that case we might include other peaks
         #    I think the best way is by using frequency values, so that they can be inferred by eye from the spectrum preventively.
-        #    In this case, I know x_l and x_r are safely within x=11.8 and x=12
     indices = np.where((x>=low_bnd) & (x<=high_bnd))
     len_to_discard = len(np.where(x<low_bnd)[0]) # how many values from the left have been discarded
 
@@ -151,27 +102,49 @@ def fwhm_finder(x, y, i_x_peak,low_bnd, high_bnd):
     # plt.figure()
     # plt.plot(x_cut, y_cut)
     # plt.plot([new_x_peak, new_x_peak], [0,y_peak], '--',color='red')
+         # 2. let's define the two sides of the peak
+    l_side_x = x_cut[:new_i_x_peak+1] # the peak center is included!
+    r_side_x = x_cut[new_i_x_peak:] # the peak center is included!
+    l_side_y = y_cut[:new_i_x_peak+1] # the peak center is included!
+    r_side_y = y_cut[new_i_x_peak:] # the peak center is included!
+    # plt.plot(l_side_x, l_side_y)
+    # plt.plot(r_side_x, r_side_y)
     
-        # 2. let's define the two sides of the peak
-    l_side_x = x_cut[:new_i_x_peak] # the peak center is excluded!
-    r_side_x = x_cut[new_i_x_peak+1:] # the peak center is excluded!
-    l_side_y = y_cut[:new_i_x_peak] # the peak center is excluded!
-    r_side_y = y_cut[new_i_x_peak+1:] # the peak center is excluded!
-            # check that the two sides are monotonically increasing and decreasing, respectively
-    assert all(l_side_y[1:] > l_side_y[0]), "Left side not decreasing"
-    assert all(r_side_y[1:] < r_side_y[0]), "Right side not decreasing"
     
-        # 3. let's interpolate
-    interpolator_l = interp1d(x=l_side_y,y=l_side_x, kind='linear', bounds_error=False, fill_value=0)
-    interpolator_r = interp1d(x=r_side_y,y=r_side_x, kind='linear', bounds_error=False, fill_value=0)
-    
-        # 4. let's find x_l and x_r via the interpolated semi-peaks
-    l_x = interpolator_l(hm)
-    r_x = interpolator_r(hm)
-    # print(l_x, r_x)
-    # plt.plot([l_x,l_x], [0, hm], '--',color='grey')
-    # plt.plot([r_x,r_x], [0, hm], '--',color='grey')
-    # print(r_x-l_x)
+        # 3. let's find the two closest point to the half maximum (hm) a and b, such that a < hm < b, for both sides
+        #    if there is a point with y exactly = hm, use that one instead
+    attempt = np.where(abs(l_side_y - hm) < 0.000001)[0]
+    if len(attempt) != 0:
+        l_x = l_side_x[attempt]
+    else:
+        # print(np.where(l_side_y < hm))
+        # plt.plot([11, 12], [hm, hm], color='purple')
+        p1 = np.where(l_side_y == l_side_y[np.where(l_side_y < hm)].max())[0]
+        p2 = np.where(l_side_y == l_side_y[np.where(l_side_y > hm)].min())[0]
+        # plt.plot(l_side_x[p1], l_side_y[p1],'.', color='grey')
+        # plt.plot(l_side_x[p2], l_side_y[p2],'.', color='grey')
+        
+        dx = l_side_x[p1] - l_side_x[p2]
+        dy = l_side_y[p1] - l_side_y[p2]
+        l_x = (hm-l_side_y[p2] + l_side_x[p2] * dy/dx) * dx/dy
+
+    attempt = np.where(abs(r_side_y - hm) < 0.000001)[0]
+    if len(attempt) != 0:
+        r_x = r_side_x[attempt]
+    else:
+        p3 = np.where(r_side_y == r_side_y[np.where(r_side_y > hm)].min())[0]
+        p4 = np.where(r_side_y == r_side_y[np.where(r_side_y < hm)].max())[0]
+        # plt.plot(r_side_x[p3], r_side_y[p3],'.', color='grey')
+        # plt.plot(r_side_x[p4], r_side_y[p4],'.', color='grey')
+        # print(f'p3: {r_side_x[p3]}, {r_side_y[p3]}')
+        # print(f'p4: {r_side_x[p4]}, {r_side_y[p4]}')
+        dx = r_side_x[p3] - r_side_x[p4]
+        dy = r_side_y[p3] - r_side_y[p4]
+        r_x = (hm-r_side_y[p4] + r_side_x[p4] * dy/dx) * dx/dy
+        # print(f'r_x: {r_x}')
+        # print(f'hm: {hm}')
+    r_x = r_x[0]
+    l_x = l_x[0]
     return r_x-l_x, l_x, r_x
 
 
@@ -242,7 +215,7 @@ def old_new_fwhm_finder(x, y, x_peak=None, plot=False):
 
     return fwhm, i_l, i_r
 
-def peak_finder(x, ref_yy, n_peaks=None):
+def peak_finder_DEPRECATED(x, ref_yy, n_peaks=None):
     """
     Identify peaks in the signal and return their indices, x, and y values.
 
@@ -267,6 +240,17 @@ def peak_finder(x, ref_yy, n_peaks=None):
 
     crit_list = [[i, x[i], ref_yy[i]] for i in idxs]
     return np.array(crit_list)
+
+def find_peaks(spec, n=20):
+    peaks = []
+    interval = list(range(-n, n+1))
+    interval.pop(n)
+    for i in range(n, len(spec)-n):
+        [spec[i] > spec[i + x] for x in interval]
+        if np.all([spec[i] > spec[i + x] for x in interval]):
+            peaks.append([i, spec[i]])
+    peaks = sorted(peaks, key=lambda x: x[1])
+    return peaks
     
 def old_fwhm_finder(x, ref_yy, x_max):
     """

@@ -625,7 +625,7 @@ def launch_stdep(root_dir: str = './',
             else:
                 undone_prev_iters.append(prev_iter)
         del prev_iters
-        if len(prev_done_iters) == 0:
+        if len(done_prev_iters) == 0:
             raise ValueError('You asked to restart, but no previous complete iteration was found!')
         else:
             last_iter_done = max(done_prev_iters)
